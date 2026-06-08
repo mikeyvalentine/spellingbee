@@ -448,19 +448,22 @@ interface SplatBlobs {
 const easeOutBack = (p: number) => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2); };
 const easeInCubic = (p: number) => p * p * p;
 // Random splatter geometry, generated once per throw (so it doesn't flicker).
+// Geometry is normalized so the shape's max reach is ~1.25 of half-W/H (lobes)
+// and drips stay within ~1.3 of half-H below — the overlay uses those bounds to
+// keep the whole splat inside the board.
 function genSplatBlobs(): SplatBlobs {
-  const main: SplatBlobs["main"] = [{ x: 0, y: 0, rx: 1.06, ry: 1.0, rot: 0 }]; // central mass covers the box
+  const main: SplatBlobs["main"] = [{ x: 0, y: 0, rx: 1.0, ry: 0.92, rot: 0 }]; // central mass covers the cells
   const lobes = 9 + Math.floor(Math.random() * 4);
   for (let i = 0; i < lobes; i++) {
     const a = (i / lobes) * Math.PI * 2 + (Math.random() - 0.5) * 0.6;
-    const rad = 0.72 + Math.random() * 0.5;
-    main.push({ x: Math.cos(a) * rad, y: Math.sin(a) * rad * 0.82, rx: 0.26 + Math.random() * 0.32, ry: 0.24 + Math.random() * 0.3, rot: Math.random() * Math.PI });
+    const rad = 0.55 + Math.random() * 0.28; // center ≤ 0.83
+    main.push({ x: Math.cos(a) * rad, y: Math.sin(a) * rad * 0.8, rx: 0.18 + Math.random() * 0.22, ry: 0.16 + Math.random() * 0.2, rot: Math.random() * Math.PI });
   }
   const drips: SplatBlobs["drips"] = [];
-  const nd = 3 + Math.floor(Math.random() * 3);
-  for (let i = 0; i < nd; i++) drips.push({ x: (Math.random() * 2 - 1) * 0.85, len: 0.5 + Math.random() * 0.8, r: 0.07 + Math.random() * 0.07 });
+  const nd = 2 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < nd; i++) drips.push({ x: (Math.random() * 2 - 1) * 0.66, len: 0.3 + Math.random() * 0.4, r: 0.06 + Math.random() * 0.05 });
   const seeds: SplatBlobs["seeds"] = [];
-  for (let i = 0; i < 7; i++) seeds.push({ x: (Math.random() * 2 - 1) * 0.68, y: (Math.random() * 2 - 1) * 0.55, r: 0.05 + Math.random() * 0.04 });
+  for (let i = 0; i < 7; i++) seeds.push({ x: (Math.random() * 2 - 1) * 0.6, y: (Math.random() * 2 - 1) * 0.5, r: 0.05 + Math.random() * 0.04 });
   return { main, drips, seeds };
 }
 function drawSplatShape(c: CanvasRenderingContext2D, halfW: number, halfH: number, b: SplatBlobs) {
@@ -714,21 +717,34 @@ function makeChalkboard(): Chalkboard {
     if (n < 1) return;
     const t = performance.now() - splat.start;
     const { duration, revealMs, hideMs, cover } = splat;
+    const M = 16; // keep the whole splat inside the board with this margin
+    const LOBE = 1.28, EX_TOP = 1.3, EX_BOT = 1.55; // shape reach factors (see genSplatBlobs)
+    const { cellW, fontSize, startX, yc } = cellGeom(n);
+
+    let halfW = (cover * cellW) / 2 + cellW * 0.06;
+    let halfH = fontSize * 0.55;
+    // Scale the splat down if it (with its lobes) would overflow the board width
+    // — the dominant constraint for long words. Keeps it inside the canvas.
+    const maxHalfW = (W - 2 * M) / (2 * LOBE * 1.08); // 1.08 leaves room for the reveal overshoot
+    if (halfW > maxHalfW) { const f = maxHalfW / halfW; halfW = maxHalfW; halfH *= f; }
+    const exX = halfW * LOBE, exTop = halfH * EX_TOP, exBot = halfH * EX_BOT;
+
+    // Center, clamped so the shape's extents stay within [M, W-M] × [M, H-M].
+    const cx = Math.min(Math.max(startX + (cover * cellW) / 2, M + exX), W - M - exX);
+    const cy = Math.min(Math.max(yc, M + exTop), H - M - exBot);
+
     let scaleX = 1, yOff = 0, alpha = 1;
     if (t < revealMs) {
       scaleX = Math.max(0.04, easeOutBack(t / revealMs)); // splatter spreads outward
     } else if (t > duration - hideMs) {
       const p = Math.min(1, (t - (duration - hideMs)) / hideMs);
-      yOff = easeInCubic(p) * (H * 0.55); // slides down the board
+      const slideMax = Math.max(0, (H - M) - (cy + exBot)); // never slide past the bottom margin
+      yOff = easeInCubic(p) * slideMax; // slides down (bounded)
       alpha = 1 - p; // and fades away
     }
-    const { cellW, fontSize, startX, yc } = cellGeom(n);
-    const cx = startX + (cover * cellW) / 2;
-    const halfW = (cover * cellW) / 2 + cellW * 0.12;
-    const halfH = fontSize * 0.72;
     c.save();
     c.globalAlpha = alpha;
-    c.translate(cx, yc + yOff);
+    c.translate(cx, cy + yOff);
     c.scale(scaleX, 1);
     drawSplatShape(c, halfW, halfH, splat.blobs);
     c.restore();
