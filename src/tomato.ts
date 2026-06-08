@@ -130,7 +130,7 @@ export function makeTomato(camera: THREE.PerspectiveCamera, scene: THREE.Scene):
       mesh.position.copy(from);
       mesh.scale.setScalar(0.32);
       scene.add(mesh);
-      flights.push({ mesh, from: from.clone(), to: to.clone(), arc: from.distanceTo(to) * 0.28, t: 0, onLand });
+      flights.push({ mesh, from: from.clone(), to: to.clone(), arc: from.distanceTo(to) * 0.17, t: 0, onLand });
     },
   };
 }

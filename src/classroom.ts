@@ -68,8 +68,9 @@ export interface Classroom {
   setBoardResult(guess: string, correct: boolean, answer: string): void;
   clearBoard(length: number): void;
   setBoardHeader(text: string, accent?: { text: string; color: string } | null): void;
-  /** Per-player stats on the secondary (left) board: name, WPM, accuracy %. */
-  setStats(name: string, wpm: number, accuracy: number): void;
+  /** Per-player stats on the secondary (left) board: name, WPM, accuracy %.
+   *  `mine` = the name is the viewing client's own player (gets the yellow pill). */
+  setStats(name: string, wpm: number, accuracy: number, mine: boolean): void;
   clearStats(): void;
   /** Write both boards' current content in, one char at a time (turn start). */
   revealBoards(): void;
@@ -890,7 +891,7 @@ function makeChalkboard(): Chalkboard {
 // ---------------------------------------------------------------------------
 interface StatsBoard {
   mesh: THREE.Mesh;
-  setStats(name: string, wpm: number, accuracy: number): void;
+  setStats(name: string, wpm: number, accuracy: number, mine: boolean): void;
   clear(): void;
   writeIn(onDone?: () => void): void;
   eraseOut(onDone?: () => void): void;
@@ -906,7 +907,7 @@ function makeStatsBoard(): StatsBoard {
   );
   mesh.name = "StatsBoardText";
 
-  let state: { name: string; wpm: number; acc: number } | null = null;
+  let state: { name: string; wpm: number; acc: number; mine: boolean } | null = null;
   // A "LABEL:  value" row, label muted + smaller, value bright + bigger.
   const statRow = (label: string, value: string, y: number): Line => ({
     glyphs: layoutCentered(ctx, [
@@ -916,12 +917,15 @@ function makeStatsBoard(): StatsBoard {
   });
   const rebuild = () => {
     if (!state) return surf.setLines([]);
-    // Name on top (white, underlined); WPM + ACC stacked on two rows below, high
-    // enough that the seated avatar doesn't cover them.
-    // The current speller's name: black on a solid yellow pill (no underline).
-    const nameGlyphs = layoutCentered(ctx, [{ text: state.name, color: "#1b1b1b", font: `700 52px ${FONT}` }], W / 2, 80);
+    // Name on top; WPM + ACC stacked on two rows below, high enough that the
+    // seated avatar doesn't cover them. ONLY the viewing client's own name gets
+    // the yellow pill (black text, no underline); every other speller — including
+    // bots — shows the basic white/bold/underlined style.
+    const nameLine: Line = state.mine
+      ? { glyphs: layoutCentered(ctx, [{ text: state.name, color: "#1b1b1b", font: `700 52px ${FONT}` }], W / 2, 80), pill: "#ffd23b" }
+      : { glyphs: layoutCentered(ctx, [{ text: state.name, color: "#f4f1e8", font: `700 52px ${FONT}` }], W / 2, 80), underlineY: 98 };
     surf.setLines([
-      { glyphs: nameGlyphs, pill: "#ffd23b" },
+      nameLine,
       statRow("WPM", String(state.wpm), 224),
       statRow("ACC", `${state.acc}%`, 326),
     ]);
@@ -931,11 +935,11 @@ function makeStatsBoard(): StatsBoard {
 
   return {
     mesh,
-    setStats: (name, wpm, accuracy) => {
+    setStats: (name, wpm, accuracy, mine) => {
       // Skip the rebuild + full texture re-upload when nothing displayed changed
       // (setStats fires on every keystroke, but WPM/acc are integers).
-      if (state && state.name === name && state.wpm === wpm && state.acc === accuracy) return;
-      state = { name, wpm, acc: accuracy };
+      if (state && state.name === name && state.wpm === wpm && state.acc === accuracy && state.mine === mine) return;
+      state = { name, wpm, acc: accuracy, mine };
       rebuild();
     },
     clear: () => {

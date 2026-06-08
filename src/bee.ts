@@ -556,7 +556,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
         classroom.clearSplat(); // clear any splat from last turn
         seatPlayers();
         // Secondary board: current speller's name + (cumulative) accuracy, WPM resets.
-        classroom.setStats(getName(m.spellerId), 0, m.accuracy ?? 100);
+        classroom.setStats(getName(m.spellerId), 0, m.accuracy ?? 100, m.spellerId === localId);
 
         // Stage the boards' content, then write it all in one char at a time.
         // The tier is known now, so show the round header straight away.
@@ -602,7 +602,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
         // censor again defensively). The speller's own board updates locally.
         if (m.spellerId !== localId) classroom.setBoardGuess(censor(m.text || ""), curLength);
         // Live WPM + accuracy on the secondary stats board (everyone sees it).
-        classroom.setStats(getName(m.spellerId), m.wpm ?? 0, m.accuracy ?? 100);
+        classroom.setStats(getName(m.spellerId), m.wpm ?? 0, m.accuracy ?? 100, m.spellerId === localId);
         break;
 
       case "bee_turn_result": {
