@@ -9,6 +9,7 @@ import * as THREE from "three";
 export interface TomatoView {
   group: THREE.Group; // idle corner tomato (add to scene)
   setVisible(v: boolean): void;
+  setHover(v: boolean): void; // hover = subtle scale-up + glow
   update(dt: number): void; // anchor + spin idle; advance flights
   hitTest(ndcX: number, ndcY: number): boolean; // pointer over the idle tomato
   cornerWorldPos(out: THREE.Vector3): THREE.Vector3; // idle tomato's world position
@@ -16,19 +17,23 @@ export interface TomatoView {
   launch(from: THREE.Vector3, to: THREE.Vector3, onLand: () => void): void;
 }
 
-// Idle pose in camera space (-Z forward). Lower-right corner. Tuned by eye.
-const IDLE = { pos: new THREE.Vector3(0.66, -0.46, -1.35), scale: 0.32 };
+// Idle pose in camera space (-Z forward). Lower-right corner, near the edge.
+const IDLE = { pos: new THREE.Vector3(0.74, -0.46, -1.35), scale: 0.32 };
 const SPIN_AXIS = new THREE.Vector3(0.32, 1, 0.06).normalize();
 const SPIN_SPEED = 0.9; // rad/s
 const FLIGHT_MS = 413; // throw speed (was 620 — 1.5x faster)
+const HOVER_SCALE = 0.14; // extra scale on hover
+const HOVER_GLOW = 0.34; // peak emissive intensity on hover
 
 function buildTomato(): THREE.Group {
   const g = new THREE.Group();
   const body = new THREE.Mesh(
     new THREE.SphereGeometry(0.5, 28, 20),
-    new THREE.MeshStandardMaterial({ color: 0xd62b1f, roughness: 0.42, metalness: 0.0 })
+    // emissive (intensity 0 at rest) is raised on hover for a subtle glow.
+    new THREE.MeshStandardMaterial({ color: 0xd62b1f, roughness: 0.42, metalness: 0.0, emissive: 0xd62b1f, emissiveIntensity: 0 })
   );
   body.scale.set(1, 0.86, 1); // slightly squashed, tomato-ish
+  body.name = "tomatoBody";
   g.add(body);
   // Calyx (green star) + little stem on top.
   const green = new THREE.MeshStandardMaterial({ color: 0x4f8f37, roughness: 0.7 });
@@ -72,9 +77,12 @@ export function makeTomato(camera: THREE.PerspectiveCamera, scene: THREE.Scene):
   const spinner = buildTomato();
   group.add(spinner);
   scene.add(group);
+  const bodyMat = (spinner.getObjectByName("tomatoBody") as THREE.Mesh).material as THREE.MeshStandardMaterial;
 
   let visible = false;
   let spin = 0;
+  let hover = false;
+  let hoverAmt = 0; // eased 0..1 hover strength
   const flights: Flight[] = [];
 
   const local = new THREE.Matrix4();
@@ -86,12 +94,18 @@ export function makeTomato(camera: THREE.PerspectiveCamera, scene: THREE.Scene):
   const update = (dt: number) => {
     group.visible = visible;
     if (visible) {
+      hoverAmt += ((hover ? 1 : 0) - hoverAmt) * Math.min(1, dt * 12); // ease toward target
+      bodyMat.emissiveIntensity = HOVER_GLOW * hoverAmt;
+      const s = IDLE.scale * (1 + HOVER_SCALE * hoverAmt);
       spin += dt * SPIN_SPEED;
       spinner.quaternion.setFromAxisAngle(SPIN_AXIS, spin);
       camera.updateMatrixWorld();
-      local.compose(IDLE.pos, id, sc.set(IDLE.scale, IDLE.scale, IDLE.scale));
+      local.compose(IDLE.pos, id, sc.set(s, s, s));
       group.matrix.multiplyMatrices(camera.matrixWorld, local);
       group.matrixWorldNeedsUpdate = true;
+    } else if (hoverAmt !== 0) {
+      hoverAmt = 0;
+      bodyMat.emissiveIntensity = 0;
     }
     // advance flights
     for (let i = flights.length - 1; i >= 0; i--) {
@@ -113,7 +127,8 @@ export function makeTomato(camera: THREE.PerspectiveCamera, scene: THREE.Scene):
 
   return {
     group,
-    setVisible: (v) => { visible = v; },
+    setVisible: (v) => { visible = v; if (!v) hover = false; },
+    setHover: (v) => { hover = v; },
     update,
     hitTest: (x, y) => {
       if (!visible) return false;

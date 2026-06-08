@@ -82,6 +82,14 @@ export interface Classroom {
   clearSplat(): void;
   /** Game-over screen on the main board: a title with an optional subtitle. */
   setEndScreen(title: string, subtitle: string): void;
+  /** Golden chalk: reveal a letter at `index` in gold (crossfades from whatever was there). */
+  revealLetter(index: number, letter: string): void;
+  /** Clear all golden-chalk reveals + the aim oval (turn boundary). */
+  clearReveals(): void;
+  /** Highlight the letter slot the chalk is aiming at (-1 clears the oval). */
+  setBoardAim(index: number): void;
+  /** Hit-test a pointer (NDC) against the board's letter slots; returns index or -1. */
+  boardSlotAt(ndcX: number, ndcY: number, camera: THREE.Camera): number;
 }
 
 const norm = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -127,8 +135,21 @@ export async function loadClassroom(scene: THREE.Scene): Promise<Classroom> {
     splatTomato: board.splatTomato,
     clearSplat: board.clearSplat,
     setEndScreen: board.setEnd,
+    revealLetter: board.revealLetter,
+    clearReveals: board.clearReveals,
+    setBoardAim: board.setAim,
+    boardSlotAt: (ndcX, ndcY, cam) => {
+      boardRay.setFromCamera(boardNdc.set(ndcX, ndcY), cam);
+      const hit = boardRay.intersectObject(board.mesh, false)[0];
+      if (!hit || !hit.uv) return -1;
+      return board.slotAtUV(hit.uv.x, hit.uv.y);
+    },
   };
 }
+
+// Shared raycaster for board slot hit-testing (golden chalk aim).
+const boardRay = new THREE.Raycaster();
+const boardNdc = new THREE.Vector2();
 
 interface ClassroomLayout {
   root: THREE.Object3D;
@@ -677,6 +698,10 @@ interface Chalkboard {
   splatTomato(durationMs: number): void; // animated tomato splat
   clearSplat(): void;
   setEnd(title: string, subtitle: string): void; // game-over screen
+  revealLetter(index: number, letter: string): void; // golden-chalk reveal
+  clearReveals(): void;
+  setAim(index: number): void; // -1 clears the aim oval
+  slotAtUV(u: number, v: number): number; // board UV -> letter-slot index (-1 = none)
 }
 
 function makeChalkboard(): Chalkboard {
@@ -690,10 +715,18 @@ function makeChalkboard(): Chalkboard {
   );
   mesh.name = "ChalkboardText";
 
+  const GOLD = "#f2c43d";
+  const REVEAL_FADE = 420; // ms for the gold reveal crossfade
   let header = "";
   let headerAccent: HeaderAccent | null = null;
+  // Per-slot display chars ("_" for empty). The CALLER composes this positionally
+  // (gold slots passed as "_"); the board colors gold slots from `reveals`.
   let cells: string[] = [];
-  let cellsColor = "#f4f1e8";
+  let wordLen = 0; // number of letter cells this turn
+  // Golden-chalk reveals: slot index -> { gold letter, fade start, char it replaced }.
+  const reveals = new Map<number, { letter: string; start: number; prev: string }>();
+  let aimIndex = -1; // slot currently highlighted by the chalk aim oval (-1 = none)
+  let revealRaf = 0;
   // Animated tomato splat (covers all but the last 2 letters — see splatTomato).
   let splat: { start: number; duration: number; revealMs: number; hideMs: number; cover: number; blobs: SplatBlobs } | null = null;
   let splatRaf = 0;
@@ -807,24 +840,125 @@ function makeChalkboard(): Chalkboard {
         lines.push(wordCellsLine(g, "#ff8a8a", 222, n, true));
         lines.push(answerLine(ans, 372));
       }
-    } else if (cells.length) {
-      const n = cells.length;
+    } else if (wordLen > 0) {
+      const n = wordLen;
       const { cellW, fontSize, startX, yc } = cellGeom(n);
       const font = `700 ${fontSize}px ${FONT}`;
       ctx.font = font;
-      const glyphs: Glyph[] = cells.map((ch, i) => ({
-        ch,
-        font,
-        color: cellsColor,
-        x: startX + i * cellW + cellW / 2 - ctx.measureText(ch).width / 2,
-        y: yc,
-      }));
+      const now = performance.now();
+      const glyphs: Glyph[] = [];
+      for (let i = 0; i < n; i++) {
+        const r = reveals.get(i);
+        if (r) {
+          // A still-fading reveal is drawn by the afterDraw overlay (cross/fade);
+          // once settled it lives in the base layer as a solid gold letter.
+          if (now - r.start < REVEAL_FADE) continue;
+          const ch = r.letter.toUpperCase();
+          glyphs.push({ ch, font, color: GOLD, x: startX + i * cellW + cellW / 2 - ctx.measureText(ch).width / 2, y: yc });
+        } else {
+          const ch = cells[i] ?? "_";
+          glyphs.push({ ch, font, color: "#f4f1e8", x: startX + i * cellW + cellW / 2 - ctx.measureText(ch).width / 2, y: yc });
+        }
+      }
       lines.push({ glyphs });
     }
     surf.setLines(lines);
   };
 
-  surf.setAfterDraw(drawSplatOverlay);
+  // Golden-chalk reveal crossfade overlay: for each still-fading reveal, fade the
+  // replaced char out and the gold letter in (settled reveals live in the base layer).
+  const drawRevealOverlay = (c: CanvasRenderingContext2D) => {
+    if (!reveals.size || resultMode || endMode) return;
+    const n = wordLen;
+    if (n < 1) return;
+    const { cellW, fontSize, startX, yc } = cellGeom(n);
+    const font = `700 ${fontSize}px ${FONT}`;
+    const now = performance.now();
+    c.save();
+    c.textBaseline = "middle";
+    c.textAlign = "left";
+    c.font = font;
+    c.shadowColor = "rgba(0,0,0,0.4)";
+    c.shadowBlur = 5;
+    for (const [i, r] of reveals) {
+      if (i < 0 || i >= n) continue;
+      const a = Math.min(1, (now - r.start) / REVEAL_FADE);
+      if (a >= 1) continue; // settled — drawn by the base layer
+      const cx = startX + i * cellW + cellW / 2;
+      if (r.prev && r.prev !== "_") {
+        c.globalAlpha = 1 - a; // old char fades out
+        c.fillStyle = "#f4f1e8";
+        c.fillText(r.prev, cx - c.measureText(r.prev).width / 2, yc);
+      }
+      const ch = r.letter.toUpperCase(); // gold fades in
+      c.globalAlpha = a;
+      c.fillStyle = GOLD;
+      c.fillText(ch, cx - c.measureText(ch).width / 2, yc);
+    }
+    c.globalAlpha = 1;
+    c.restore();
+  };
+
+  // Golden oval around the slot the chalk is currently aiming at.
+  const drawAimOverlay = (c: CanvasRenderingContext2D) => {
+    if (aimIndex < 0 || resultMode || endMode) return;
+    const n = wordLen;
+    if (aimIndex >= n) return;
+    const { cellW, fontSize, startX, yc } = cellGeom(n);
+    const cx = startX + aimIndex * cellW + cellW / 2;
+    c.save();
+    c.strokeStyle = GOLD;
+    c.lineWidth = 6;
+    c.shadowColor = GOLD;
+    c.shadowBlur = 18;
+    c.beginPath();
+    c.ellipse(cx, yc, cellW * 0.52, fontSize * 0.6, 0, 0, Math.PI * 2);
+    c.stroke();
+    c.restore();
+  };
+
+  surf.setAfterDraw((c) => { drawRevealOverlay(c); drawAimOverlay(c); drawSplatOverlay(c); });
+
+  // Map a board UV (u across width, v with 0 at the bottom) to a letter-slot index.
+  const slotAtUV = (u: number, v: number): number => {
+    const n = wordLen;
+    if (n < 1) return -1;
+    const { cellW, fontSize, startX, yc } = cellGeom(n);
+    const cx = u * W, cy = (1 - v) * H; // canvas is top-down; uv v=0 is the bottom
+    if (cy < yc - fontSize * 0.78 || cy > yc + fontSize * 0.78) return -1; // off the row
+    const i = Math.floor((cx - startX) / cellW);
+    return i >= 0 && i < n ? i : -1;
+  };
+
+  // Reveal a letter at `index` in gold, crossfading from whatever was shown there.
+  const revealLetter = (index: number, letter: string) => {
+    if (index < 0 || !letter) return;
+    const prev = cells[index] ?? "_"; // the char shown there (for the crossfade)
+    reveals.set(index, { letter, start: performance.now(), prev });
+    rebuild();
+    cancelAnimationFrame(revealRaf);
+    const anyFading = () => {
+      const now = performance.now();
+      for (const r of reveals.values()) if (now - r.start < REVEAL_FADE) return true;
+      return false;
+    };
+    const tick = () => {
+      surf.redraw();
+      if (anyFading()) revealRaf = requestAnimationFrame(tick);
+      else rebuild(); // settle: gold letters move into the base layer
+    };
+    revealRaf = requestAnimationFrame(tick);
+  };
+  const clearReveals = () => {
+    reveals.clear();
+    aimIndex = -1;
+    cancelAnimationFrame(revealRaf);
+  };
+  const setAim = (index: number) => {
+    if (aimIndex === index) return;
+    aimIndex = index;
+    surf.redraw();
+  };
 
   // Throw a tomato: splat covers all but the last 2 letters, growing in, holding,
   // then sliding down + fading over `durationMs`.
@@ -852,10 +986,11 @@ function makeChalkboard(): Chalkboard {
   const setGuess = (typed: string, length: number) => {
     resultMode = null; // typing always clears a prior result
     endMode = null;
-    const t = typed.toUpperCase().slice(0, length);
+    wordLen = Math.max(0, length);
+    // `typed` is the positional per-slot display ("_" for empty / gold slots).
+    const t = typed.toUpperCase();
     cells = [];
-    for (let i = 0; i < length; i++) cells.push(t[i] ?? "_");
-    cellsColor = "#f4f1e8";
+    for (let i = 0; i < wordLen; i++) cells.push(t[i] ?? "_");
     rebuild();
   };
   // Wrong: keep their `guess` (struck red) + the correct `answer` below in white.
@@ -864,7 +999,7 @@ function makeChalkboard(): Chalkboard {
     resultMode = { guess, correct, answer };
     rebuild();
   };
-  const clear = (length: number) => setGuess("", length);
+  const clear = (length: number) => { clearReveals(); setGuess("", length); };
   const setHeader = (text: string, accent: HeaderAccent | null = null) => {
     header = text;
     headerAccent = accent;
@@ -882,6 +1017,7 @@ function makeChalkboard(): Chalkboard {
     mesh, setGuess, setResult, clear, setHeader,
     writeIn: surf.writeIn, eraseOut: surf.eraseOut,
     splatTomato, clearSplat, setEnd,
+    revealLetter, clearReveals, setAim, slotAtUV,
   };
 }
 

@@ -120,9 +120,9 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
     if (!st || st.letters === 0) return 100;
     return Math.max(0, Math.min(100, Math.round(((st.letters - st.corrections) / st.letters) * 100)));
   };
-  // Record a keystroke update for `id`, returning live { wpm, accuracy }.
-  const recordKey = (id, text) => {
-    const len = text.length;
+  // Record a keystroke update for `id` (len = real typed-letter count, excluding
+  // "_" placeholders + gold reveals), returning live { wpm, accuracy }.
+  const recordKey = (id, len) => {
     if (turnTypeStart === 0 && len > 0) turnTypeStart = Date.now();
     const delta = len - prevKeyLen;
     prevKeyLen = len;
@@ -155,6 +155,10 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
   // ---- tomato power-up ----
   const tomatoThrowers = new Set(); // player ids who've thrown this turn (one each)
   let turnEndsAt = 0; // ms timestamp the current turn's timer ends (for splat duration)
+
+  // ---- golden chalk power-up ----
+  const chalkUsers = new Set(); // speller ids who've spent their chalk (once per match)
+  let turnReveal = null; // { index, letter } revealed this turn (for spectator catch-up)
 
   const lobbyState = () => ({
     type: "bee_lobby",
@@ -233,6 +237,7 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
         alive: [...alive],
       });
       if (keyText) sendTo(id, { type: "bee_key", spellerId: speller, text: keyText });
+      if (turnReveal) sendTo(id, { type: "bee_reveal", spellerId: speller, index: turnReveal.index, letter: turnReveal.letter, round });
     }
   };
 
@@ -315,6 +320,7 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
     lap = 1;
     usedWords.clear(); // no repeated words within a match
     playerStats.clear(); // reset per-player accuracy for the new match
+    chalkUsers.clear(); // everyone gets a fresh golden chalk this match
     phase = "match";
     broadcast({ type: "bee_match_start", order: [...order], mode });
     // Brief beat before round 1, then begin. Warm the opening word's audio now —
@@ -401,6 +407,7 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
     prevKeyLen = 0;
     tomatoThrowers.clear(); // fresh tomato for everyone this turn
     turnEndsAt = 0;
+    turnReveal = null; // no golden-chalk reveal yet this turn
     const turnRound = round;
     const turnWord = word;
     const turnSpeller = speller;
@@ -519,6 +526,19 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
     broadcast({ type: "bee_splat", spellerId: speller, by: senderId, round, durationMs });
   };
 
+  // The speller spends their golden chalk to reveal ONE letter of the word. Only
+  // the current speller can use it, once per match, while the turn is live. The
+  // revealed letter is broadcast (everyone sees it gold on the shared board).
+  const useChalk = (senderId, index) => {
+    if (phase !== "match" || !speller || senderId !== speller) return; // speller only
+    if (!accepting) return; // only during a live turn
+    if (chalkUsers.has(senderId)) return; // one per match
+    if (typeof index !== "number" || index < 0 || index >= word.length) return;
+    chalkUsers.add(senderId);
+    turnReveal = { index, letter: word[index] };
+    broadcast({ type: "bee_reveal", spellerId: speller, index, letter: word[index], round });
+  };
+
   // Voluntarily stop playing this match (a "spectate" from the menu): drop out
   // like an elimination but stay connected to watch; you rejoin the next match.
   const spectate = (id) => {
@@ -572,8 +592,9 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
           break;
         case "bee_key":
           if (phase === "match" && id === speller) {
-            keyText = String(m.text || "").slice(0, 40);
-            const s = recordKey(speller, keyText);
+            keyText = String(m.text || "").slice(0, 40); // positional display ("_" for empty/gold)
+            const n = typeof m.n === "number" ? m.n : keyText.replace(/[^a-z*]/gi, "").length;
+            const s = recordKey(speller, n);
             broadcast({ type: "bee_key", spellerId: speller, text: keyText, wpm: s.wpm, accuracy: s.accuracy });
           }
           break;
@@ -585,6 +606,9 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
           break;
         case "bee_tomato":
           throwTomato(id);
+          break;
+        case "bee_chalk":
+          useChalk(id, m.index);
           break;
         case "bee_spectate":
           spectate(id);

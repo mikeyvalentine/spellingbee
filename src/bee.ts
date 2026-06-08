@@ -3,6 +3,7 @@ import type { NetClient } from "./net";
 import type { AvatarManager } from "./avatars";
 import type { Classroom, CameraPose } from "./classroom";
 import { makeTomato } from "./tomato";
+import { makeChalk } from "./chalk";
 
 interface BeeOpts {
   net: NetClient;
@@ -79,7 +80,6 @@ export function setupBee(opts: BeeOpts): BeeStage {
   let curTier = "";
   let curTierColor = "#f4f1e8";
   let amSpeller = false;
-  let typed = ""; // the speller's current guess (real text; display is censored)
   let amSpectator = false; // connected during a match, not one of the players
   let answered = false;
   let timerRaf = 0;
@@ -90,6 +90,39 @@ export function setupBee(opts: BeeOpts): BeeStage {
   // ---- tomato power-up ----
   let aliveIds: string[] = []; // current alive players (from bee_turn / result)
   let tomatoUsedThisTurn = false; // one throw per opponent's turn
+
+  // ---- golden chalk power-up (speller-only) ----
+  let chalkUsedThisMatch = false; // once per match
+  let chalkAiming = false; // armed: hovering the board to pick a slot to reveal
+  // Per-slot answer model so a mid-word reveal replaces a letter IN PLACE (the
+  // player's other letters keep their positions). slots = the player's own letters
+  // by slot; gold = chalk-revealed letters by slot; gold always wins a slot.
+  let slots: (string | null)[] = [];
+  let gold: (string | null)[] = [];
+  const typedCount = () => slots.reduce((n, s) => n + (s ? 1 : 0), 0);
+  const sizeSlots = () => { slots = new Array(curLength).fill(null); gold = new Array(curLength).fill(null); };
+  // Type into the leftmost empty, non-gold slot; backspace clears the rightmost.
+  const addLetter = (ch: string) => {
+    for (let i = 0; i < curLength; i++) if (!gold[i] && !slots[i]) { slots[i] = ch.toLowerCase(); return true; }
+    return false;
+  };
+  const delLetter = () => {
+    for (let i = curLength - 1; i >= 0; i--) if (!gold[i] && slots[i]) { slots[i] = null; return true; }
+    return false;
+  };
+  // Positional board string: gold slots sent as "_" (the board colors gold from its
+  // own reveal map); empty slots "_"; the player's letters at their exact slots.
+  const boardText = () => {
+    let s = "";
+    for (let i = 0; i < curLength; i++) s += gold[i] ? "_" : (slots[i] ?? "_");
+    return s;
+  };
+  // The submitted answer = gold + typed per slot (a gap collapses → a miss).
+  const composedAnswer = () => {
+    let s = "";
+    for (let i = 0; i < curLength; i++) s += (gold[i] ?? slots[i] ?? "");
+    return s;
+  };
 
   classroom.root.visible = true; // the 3D room is shown in both lobby and match now
 
@@ -160,15 +193,44 @@ export function setupBee(opts: BeeOpts): BeeStage {
   } as any);
   document.body.appendChild(tomatoTip);
 
+  // ---- golden chalk power-up (3D), idling just LEFT of the tomato ----
+  const chalk = makeChalk(camera, scene);
+  const chalkTip = document.createElement("div");
+  chalkTip.id = "chalk-tip";
+  chalkTip.textContent = "Golden chalk: reveal a letter";
+  Object.assign(chalkTip.style, {
+    position: "fixed", zIndex: "17", display: "none", pointerEvents: "none",
+    padding: "5px 10px", borderRadius: "8px", transform: "translate(-50%, -135%)",
+    background: "rgba(12,15,22,0.9)", color: "#ffe9a8", border: "1px solid #6a531f",
+    font: "600 12px system-ui, sans-serif", whiteSpace: "nowrap",
+    boxShadow: "0 4px 14px rgba(0,0,0,0.5)",
+  } as any);
+  document.body.appendChild(chalkTip);
+
   const canThrow = () =>
     phase === "match" && !amSpeller && !amSpectator && aliveIds.includes(localId) && !tomatoUsedThisTurn;
+  // The chalk is on-screen for any in-match participant who still has it; it's only
+  // ACTIVE (gold + usable) on their own turn — greyed out ("not your turn") otherwise.
+  const chalkVisible = () =>
+    phase === "match" && !amSpectator && !matchOver && aliveIds.includes(localId) && !chalkUsedThisMatch;
+  const canChalk = () =>
+    chalkVisible() && amSpeller && !answered && curLength > 0;
+
+  const hideTips = () => {
+    tomatoTip.style.display = "none";
+    chalkTip.style.display = "none";
+    if (!chalkAiming) document.body.style.cursor = "";
+  };
 
   const updateTomatoBtn = () => {
     tomato.setVisible(canThrow());
-    if (!canThrow()) { tomatoTip.style.display = "none"; document.body.style.cursor = ""; }
+    chalk.setVisible(chalkVisible());
+    chalk.setActive(canChalk());
+    if (!canChalk() && chalkAiming) cancelAim();
+    if (!canThrow() && !chalkVisible()) hideTips();
   };
 
-  const tomatoNdc = (e: PointerEvent) =>
+  const ndcOf = (e: PointerEvent) =>
     [(e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1] as const;
 
   const throwTomato = () => {
@@ -176,22 +238,73 @@ export function setupBee(opts: BeeOpts): BeeStage {
     net.sendBee({ type: "bee_tomato" });
     tomatoUsedThisTurn = true;
     tomato.setVisible(false); // the corner tomato vanishes; the flight starts on bee_splat
-    tomatoTip.style.display = "none";
-    document.body.style.cursor = "";
+    hideTips();
   };
 
+  // Chalk aim mode: arm on click, then pick a board slot to reveal.
+  function startAim() {
+    chalkAiming = true;
+    chalk.setHover(false);
+    chalkTip.style.display = "none";
+    classroom.setBoardAim(-1);
+    document.body.style.cursor = "crosshair";
+  }
+  function cancelAim() {
+    chalkAiming = false;
+    classroom.setBoardAim(-1);
+    document.body.style.cursor = "";
+  }
+
+  const showTip = (tip: HTMLElement, e: PointerEvent) => {
+    tip.style.display = "block";
+    tip.style.left = `${e.clientX}px`;
+    tip.style.top = `${e.clientY}px`;
+  };
   window.addEventListener("pointermove", (e) => {
-    if (!canThrow()) { if (tomatoTip.style.display !== "none") { tomatoTip.style.display = "none"; document.body.style.cursor = ""; } return; }
-    const [x, y] = tomatoNdc(e);
-    const over = tomato.hitTest(x, y);
-    tomatoTip.style.display = over ? "block" : "none";
-    if (over) { tomatoTip.style.left = `${e.clientX}px`; tomatoTip.style.top = `${e.clientY}px`; }
-    document.body.style.cursor = over ? "pointer" : "";
+    const [x, y] = ndcOf(e);
+    // Aim mode: track which letter slot is under the cursor.
+    if (chalkAiming) {
+      const idx = classroom.boardSlotAt(x, y, camera);
+      classroom.setBoardAim(idx);
+      document.body.style.cursor = idx >= 0 ? "pointer" : "crosshair";
+      return;
+    }
+    // Tomato + chalk can be on-screen at once (the chalk greys out off-turn), so
+    // check both. They never overlap, so the last hovered one wins the cursor.
+    let cursor = "";
+    if (canThrow()) {
+      const over = tomato.hitTest(x, y);
+      tomato.setHover(over);
+      if (over) { showTip(tomatoTip, e); cursor = "pointer"; } else tomatoTip.style.display = "none";
+    } else tomatoTip.style.display = "none";
+
+    if (chalkVisible()) {
+      const over = chalk.hitTest(x, y);
+      const active = canChalk();
+      chalk.setHover(over && active); // greyed chalk shows no scale/glow
+      if (over) {
+        chalkTip.textContent = active ? "Golden chalk: reveal a letter" : "Golden chalk only available during your turn";
+        showTip(chalkTip, e);
+        cursor = active ? "pointer" : "not-allowed";
+      } else chalkTip.style.display = "none";
+    } else chalkTip.style.display = "none";
+
+    document.body.style.cursor = cursor;
   });
   window.addEventListener("pointerdown", (e) => {
-    if (!canThrow()) return;
-    const [x, y] = tomatoNdc(e);
-    if (tomato.hitTest(x, y)) { e.stopPropagation(); throwTomato(); }
+    const [x, y] = ndcOf(e);
+    if (chalkAiming) {
+      const idx = classroom.boardSlotAt(x, y, camera);
+      if (idx >= 0) net.sendBee({ type: "bee_chalk", index: idx }); // reveal confirmed on bee_reveal
+      cancelAim(); // a click on empty space cancels without spending it
+      e.stopPropagation();
+      return;
+    }
+    if (canThrow() && tomato.hitTest(x, y)) { e.stopPropagation(); throwTomato(); return; }
+    if (canChalk() && chalk.hitTest(x, y)) { e.stopPropagation(); startAim(); return; }
+  });
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && chalkAiming) { cancelAim(); e.preventDefault(); }
   });
 
   // ---- top-right universal menu (always visible: lobby + match) ----
@@ -391,6 +504,8 @@ export function setupBee(opts: BeeOpts): BeeStage {
     boardReplay.style.display = "none";
     classroom.clearStats();
     classroom.clearSplat();
+    if (chalkAiming) cancelAim();
+    classroom.clearReveals();
     aliveIds = [];
     updateMatchHud();
     updateTomatoBtn();
@@ -405,6 +520,9 @@ export function setupBee(opts: BeeOpts): BeeStage {
     amSpectator = order.length > 0 && !order.includes(localId);
     specBanner.style.display = amSpectator ? "block" : "none";
     activeSpeller = null;
+    chalkUsedThisMatch = false; // fresh golden chalk for the new match
+    slots = []; gold = [];
+    if (chalkAiming) cancelAim();
     classroom.root.visible = true;
     classroom.setBoardHeader("🐝 Spelling Bee");
     classroom.clearBoard(0);
@@ -425,21 +543,25 @@ export function setupBee(opts: BeeOpts): BeeStage {
   // Mirror the current guess to the 3D board + spectators (censored). Leaves
   // input.value alone so it never fights the native field while typing.
   const pushGuess = () => {
-    const shown = censor(typed);
+    const shown = censor(boardText()); // positional, gold slots as "_"
     classroom.setBoardGuess(shown, curLength);
-    net.sendBee({ type: "bee_key", text: shown }); // spectators see the censored guess
+    // `n` = the player's real typed-letter count, so server WPM/accuracy ignores
+    // gold reveals and "_" placeholders.
+    net.sendBee({ type: "bee_key", text: shown, n: typedCount() });
   };
-  // Desktop path: the field is a passive mirror, so echo the censored guess there.
+  // Desktop path: the field is a passive mirror, so echo the gapless guess there.
   const renderGuess = () => {
-    input.value = censor(typed);
+    input.value = censor(slots.filter(Boolean).join(""));
     pushGuess();
   };
 
   const submit = () => {
     if (answered || !amSpeller) return;
     answered = true;
-    net.sendBee({ type: "bee_answer", text: typed });
-    statusEl.textContent = `🔒 Locked in: ${censor(typed) || "(blank)"}`;
+    if (chalkAiming) cancelAim();
+    const answer = composedAnswer(); // typed letters + any gold-revealed letters
+    net.sendBee({ type: "bee_answer", text: answer });
+    statusEl.textContent = `🔒 Locked in: ${censor(answer) || "(blank)"}`;
     updateMatchHud(); // hide the input row now that the guess is locked
   };
 
@@ -462,9 +584,12 @@ export function setupBee(opts: BeeOpts): BeeStage {
   // clamp to the word length, then mirror to the board/spectators.
   input.addEventListener("input", () => {
     if (!isTouch || phase !== "match" || !amSpeller || answered) return;
-    const raw = input.value.toLowerCase().replace(/[^a-z]/g, "").slice(0, curLength);
-    if (input.value !== raw) input.value = raw;
-    typed = raw;
+    // Distribute the native field's letters into the empty (non-gold) slots in order.
+    const raw = input.value.toLowerCase().replace(/[^a-z]/g, "");
+    let ti = 0;
+    for (let i = 0; i < curLength; i++) { if (gold[i]) continue; slots[i] = ti < raw.length ? raw[ti++] : null; }
+    const clamped = raw.slice(0, ti); // clamp the field to what actually fit
+    if (input.value !== clamped) input.value = clamped;
     pushGuess();
   });
   input.addEventListener("keydown", (e) => {
@@ -486,15 +611,11 @@ export function setupBee(opts: BeeOpts): BeeStage {
       e.preventDefault();
       e.stopImmediatePropagation();
     } else if (e.key === "Backspace") {
-      if (typed.length) {
-        typed = typed.slice(0, -1);
-        renderGuess();
-      }
+      if (delLetter()) renderGuess();
       e.preventDefault();
       e.stopImmediatePropagation();
     } else if (/^[a-zA-Z]$/.test(e.key) && !e.metaKey && !e.ctrlKey && !e.altKey) {
-      if (typed.length < curLength) {
-        typed += e.key.toLowerCase();
+      if (addLetter(e.key)) {
         playClick();
         renderGuess();
       }
@@ -541,6 +662,22 @@ export function setupBee(opts: BeeOpts): BeeStage {
         break;
       }
 
+      case "bee_reveal": {
+        const i = m.index;
+        const letter = String(m.letter || "");
+        if (typeof i !== "number" || i < 0 || i >= curLength || !letter) break;
+        classroom.revealLetter(i, letter.toUpperCase()); // everyone sees the gold reveal
+        if (m.spellerId === localId) {
+          gold[i] = letter.toLowerCase();
+          slots[i] = null; // the reveal takes this slot (replaces any letter in place)
+          chalkUsedThisMatch = true;
+          if (chalkAiming) cancelAim();
+          pushGuess(); // recompose my board with the reveal in place
+          updateTomatoBtn(); // chalk is spent → hide it
+        }
+        break;
+      }
+
       case "bee_turn": {
         activeSpeller = m.spellerId;
         curLength = m.length;
@@ -549,10 +686,12 @@ export function setupBee(opts: BeeOpts): BeeStage {
         curTierColor = tierColor(m.tier ?? "easy");
         amSpeller = m.spellerId === localId;
         answered = false;
-        typed = ""; // fresh guess; typing is captured globally (no click needed)
+        sizeSlots(); // fresh empty per-slot answer (typing is captured globally)
         lastBuffer = null; // word audio arrives via bee_audio
         aliveIds = m.alive ?? aliveIds;
         tomatoUsedThisTurn = false; // fresh tomato for this opponent's turn
+        if (chalkAiming) cancelAim();
+        classroom.clearReveals();
         classroom.clearSplat(); // clear any splat from last turn
         seatPlayers();
         // Secondary board: current speller's name + (cumulative) accuracy, WPM resets.
@@ -701,6 +840,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
     update: (dt: number) => {
       applyCamera(phase === "match" ? classroom.matchCam : classroom.lobbyCam);
       tomato.update(dt); // anchor + spin the corner tomato; advance any flights
+      chalk.update(dt); // anchor + spin the corner golden chalk
 
       // Seats + speller are placed once by seatPlayers() on each state change; only
       // re-apply them every frame in mock/dev so the debug sliders stay live.
