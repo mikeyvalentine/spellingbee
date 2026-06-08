@@ -131,8 +131,8 @@ export function makeClipboard(camera: THREE.PerspectiveCamera): ClipboardView {
   };
 
   const paperRect = () => {
-    // Mount a bit before fully settled (the wider paper keeps text from wrapping);
-    // the panel's CSS opacity transition fades it in so it doesn't pop.
+    // Mount a bit before fully settled so the panel rides up in sync with the
+    // clipboard; the wider paper keeps the text from wrapping at this width.
     if (!visible || t < 0.93) return null;
     paper.updateWorldMatrix(true, false);
     camera.updateMatrixWorld();
