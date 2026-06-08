@@ -120,6 +120,7 @@ async function main(): Promise<void> {
     if (match) match.update(); // drives the lobby/match camera + speller
     clipboard.update(dt); // anchor + animate the lobby clipboard (after the camera is set)
     lobby.frame(); // position the paper panel over the clipboard
+    avatars.setLabelsHidden(clipboard.isFocused()); // hide nametags while the clipboard is up
     avatars.update(dt);
     renderer.render(scene, camera);
   });

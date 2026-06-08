@@ -74,6 +74,7 @@ interface Avatar {
   emoteHoldTime: number; // clip time to freeze a held emote at (its peak pose)
   ring: THREE.Mesh;
   label: THREE.Sprite;
+  labelDesired: boolean; // per-avatar wanted visibility (before the global override)
   isHost: boolean; // host gets a blue "(Host)" nametag
   speakerIcon: THREE.Sprite;
   bubble?: THREE.Sprite;
@@ -98,6 +99,7 @@ export class AvatarManager {
   private spawn = new THREE.Vector3(0, 0, 0);
   private ringRadius = 4;
   private groundSampler?: (x: number, z: number) => number | null;
+  private labelsHidden = false; // global override (e.g. while the lobby clipboard is open)
 
   constructor(private scene: THREE.Scene) {}
 
@@ -343,6 +345,7 @@ export class AvatarManager {
       emoteHoldTime: Infinity,
       ring,
       label,
+      labelDesired: true,
       isHost: false,
       speakerIcon,
       prevX: position.x,
@@ -427,7 +430,15 @@ export class AvatarManager {
   /** Show/hide an avatar's floating nametag (the speller's is hidden mid-match). */
   setLabelVisible(id: string, visible: boolean): void {
     const a = this.avatars.get(id);
-    if (a) a.label.visible = visible;
+    if (a) { a.labelDesired = visible; a.label.visible = visible && !this.labelsHidden; }
+  }
+
+  /** Global nametag override — hide ALL nametags (e.g. while the lobby clipboard
+   *  is pulled up, so they don't poke through it). Restores per-avatar state. */
+  setLabelsHidden(hidden: boolean): void {
+    if (this.labelsHidden === hidden) return;
+    this.labelsHidden = hidden;
+    for (const a of this.avatars.values()) a.label.visible = a.labelDesired && !hidden;
   }
 
   /** Marks an avatar as host: a blue nametag (vs the normal yellow name). */
@@ -438,6 +449,7 @@ export class AvatarManager {
     a.root.remove(a.label);
     a.label = makeLabel(a.name, isHost ? "#5b8cff" : "#ffdf3b");
     a.label.position.set(0, 2.1, 0);
+    a.label.visible = a.labelDesired && !this.labelsHidden;
     a.root.add(a.label);
   }
 
