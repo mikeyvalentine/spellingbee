@@ -308,11 +308,18 @@ function buildLights(root: THREE.Object3D, objs: Map<string, THREE.Object3D>): R
   let spot: THREE.SpotLight | undefined;
   const accents: THREE.Light[] = [];
   if (!isMobile) {
-    // Hero spotlight: a warm "stage" cone on the active speller, who always
-    // stands at SPELLER_POS. Gives the bee an on-stage feel; casts a soft shadow.
-    spot = new THREE.SpotLight(0xffe1b0, 80, 16, Math.PI / 5, 0.55, 1.3);
-    spot.position.set(SPELLER_POS.x + 0.3, ceilY - 0.5, SPELLER_POS.z + 1.2);
-    spot.target.position.copy(SPELLER_POS);
+    // Hero spotlight: a warm cone on the active speller (always at SPELLER_POS).
+    // It originates from the desk lamp — the "sphere" placeholder mesh marks the
+    // bulb — so the lamp reads as the source. Falls back to an overhead position.
+    spot = new THREE.SpotLight(0xffe1b0, 90, 24, Math.PI / 5, 0.55, 1.3);
+    const bulb = objs.get("sphere");
+    if (bulb) {
+      bulb.updateWorldMatrix(true, false);
+      bulb.getWorldPosition(spot.position);
+    } else {
+      spot.position.set(SPELLER_POS.x + 0.3, ceilY - 0.5, SPELLER_POS.z + 1.2);
+    }
+    spot.target.position.copy(SPELLER_POS); // still aimed at the player model
     spot.castShadow = true;
     spot.shadow.mapSize.set(1024, 1024);
     spot.shadow.bias = -0.0006;

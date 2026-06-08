@@ -51,7 +51,12 @@ const SWEARS = new Set([
   "arse", "bullshit", "douche", "dildo", "boobs", "tits", "penis", "vagina",
   "anus", "rape", "rapist", "nazi", "retard", "retarded",
 ]);
-const EXCLUDE = new Set([...HOMOPHONES, ...SWEARS]);
+// Words the TTS voice mispronounces badly enough that they're unfair to spell
+// from audio (e.g. "infinitival" comes out like "infinitible"). Add more as found.
+const MISPRONOUNCED = new Set([
+  "infinitival",
+]);
+const EXCLUDE = new Set([...HOMOPHONES, ...SWEARS, ...MISPRONOUNCED]);
 
 function buildPool(lists, min = 4, max = 10) {
   const set = new Set();

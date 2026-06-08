@@ -170,7 +170,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
     textShadow: "0 1px 3px rgba(0,0,0,0.4)",
   } as any);
   boardReplay.addEventListener("click", () => {
-    if (lastBuffer) playBuffer(lastBuffer);
+    if (lastBuffer) playBuffer(lastBuffer, REPLAY_RATE);
   });
   document.body.appendChild(boardReplay);
 
@@ -350,7 +350,8 @@ export function setupBee(opts: BeeOpts): BeeStage {
   let curSource: AudioBufferSourceNode | null = null;
   let lastBuffer: AudioBuffer | null = null; // the trimmed word, for Replay
   const ensureAudio = () => (audioCtx ??= new AudioContext());
-  const playBuffer = (buf: AudioBuffer) => {
+  const REPLAY_RATE = 0.8; // word replays play 20% slower for clarity
+  const playBuffer = (buf: AudioBuffer, rate = 1) => {
     const c = ensureAudio();
     if (curSource) {
       try {
@@ -361,6 +362,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
     }
     const s = c.createBufferSource();
     s.buffer = buf;
+    s.playbackRate.value = rate;
     s.connect(c.destination);
     s.start();
     curSource = s;
@@ -597,7 +599,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
     kbd.appendChild(r);
   });
   // Replay (round, left) + submit (round, right) FABs above the keyboard.
-  kbdReplay.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); if (lastBuffer) playBuffer(lastBuffer); });
+  kbdReplay.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); if (lastBuffer) playBuffer(lastBuffer, REPLAY_RATE); });
   kbdSubmit.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); submit(); });
   const updateKeyboard = () => {
     const show = isTouch && phase === "match" && amSpeller && !answered && !amSpectator;
@@ -638,7 +640,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
   });
 
   replayBtn.addEventListener("click", () => {
-    if (lastBuffer) playBuffer(lastBuffer);
+    if (lastBuffer) playBuffer(lastBuffer, REPLAY_RATE);
   });
 
   // ---------- network ----------
