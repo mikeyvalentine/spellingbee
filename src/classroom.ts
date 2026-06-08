@@ -96,6 +96,10 @@ export interface Classroom {
   boardSlotAt(ndcX: number, ndcY: number, camera: THREE.Camera): number;
   /** Enable the blinking awaiting-"_" cursor (only on the local speller's POV). */
   setBoardCursorEnabled(on: boolean): void;
+  /** Start the under-word turn countdown bar (depletes + reddens over durationMs). */
+  setBoardTimer(durationMs: number): void;
+  /** Clear the countdown bar. */
+  clearBoardTimer(): void;
 }
 
 const norm = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -144,6 +148,8 @@ export async function loadClassroom(scene: THREE.Scene): Promise<Classroom> {
     revealLetter: board.revealLetter,
     clearReveals: board.clearReveals,
     setBoardCursorEnabled: board.setCursorEnabled,
+    setBoardTimer: board.setTimer,
+    clearBoardTimer: board.clearTimer,
     setBoardAim: board.setAim,
     setBoardAimAll: board.setAimAll,
     boardSlotAt: (ndcX, ndcY, cam) => {
@@ -194,9 +200,23 @@ function buildFromGlb(root: THREE.Object3D, board: Chalkboard, stats: StatsBoard
     mesh.castShadow = false;
     mesh.receiveShadow = true;
     const n = norm(o.name);
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     if (n.includes("ceiling") || n.includes("roof")) {
-      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       for (const m of mats) if (m) (m as THREE.Material).side = THREE.DoubleSide;
+    }
+    // The desk lamp's glossy metal throws a sharp specular hotspot that the bloom
+    // pass blows out into a weird flare. Roughen + de-metal it (and cap any
+    // emissive) so its highlight stays under the bloom threshold.
+    if (n.includes("lamp")) {
+      for (const m of mats) {
+        const sm = m as THREE.MeshStandardMaterial;
+        if (!sm || !sm.isMeshStandardMaterial) continue;
+        sm.metalness = Math.min(sm.metalness ?? 1, 0.15);
+        sm.roughness = Math.max(sm.roughness ?? 0.5, 0.72);
+        sm.envMapIntensity = Math.min(sm.envMapIntensity ?? 1, 0.3);
+        if (sm.emissiveIntensity) sm.emissiveIntensity = Math.min(sm.emissiveIntensity, 0.4);
+        sm.needsUpdate = true;
+      }
     }
   });
 
@@ -762,6 +782,8 @@ interface Chalkboard {
   setAimAll(): void; // pulse every slot ("pick any letter")
   slotAtUV(u: number, v: number): number; // board UV -> letter-slot index (-1 = none)
   setCursorEnabled(on: boolean): void; // blink the awaiting "_" (local speller only)
+  setTimer(durationMs: number): void; // start the under-word countdown bar
+  clearTimer(): void;
 }
 
 function makeChalkboard(): Chalkboard {
@@ -798,6 +820,8 @@ function makeChalkboard(): Chalkboard {
   let cursorIdx = -1;
   let cursorOn = true;
   let blinkTimer = 0;
+  // Turn countdown bar (under the word cells): depletes + reddens as time runs out.
+  let timerStart = 0, timerDur = 0, timerRaf = 0;
   // Animated tomato splat (covers all but the last 2 letters — see splatTomato).
   let splat: { start: number; duration: number; revealMs: number; hideMs: number; cover: number; blobs: SplatBlobs } | null = null;
   let splatRaf = 0;
@@ -1039,7 +1063,44 @@ function makeChalkboard(): Chalkboard {
   const startAimPulse = () => { if (!aimTimer) aimTimer = window.setInterval(() => surf.redraw(), 33); };
   const stopAimPulse = () => { if (aimTimer) { window.clearInterval(aimTimer); aimTimer = 0; } };
 
-  surf.setAfterDraw((c) => { drawCursorOverlay(c); drawRevealOverlay(c); drawAimOverlay(c); drawSplatOverlay(c); });
+  // Countdown bar just under the word row: a depleting fill that shifts green →
+  // red as the turn's time runs out.
+  const drawTimerOverlay = (c: CanvasRenderingContext2D) => {
+    if (timerDur <= 0 || resultMode || endMode) return;
+    const n = wordLen;
+    if (n < 1) return;
+    const frac = Math.max(0, Math.min(1, 1 - (performance.now() - timerStart) / timerDur));
+    const { cellW, fontSize, startX, yc } = cellGeom(n);
+    const bx = startX, bw = cellW * n;
+    const by = yc + fontSize * 0.6 + 10, bh = 14;
+    c.save();
+    c.fillStyle = "rgba(0,0,0,0.34)"; // track
+    pillPath(c, bx, by, bw, bh, bh / 2);
+    c.fill();
+    if (frac > 0) {
+      c.fillStyle = `hsl(${Math.round(120 * frac)}, 85%, 55%)`; // green → red
+      pillPath(c, bx, by, Math.max(bh, bw * frac), bh, bh / 2);
+      c.fill();
+    }
+    c.restore();
+  };
+  const setTimer = (durationMs: number) => {
+    timerStart = performance.now();
+    timerDur = Math.max(1, durationMs);
+    cancelAnimationFrame(timerRaf);
+    let lastDraw = 0;
+    const tick = (now: number) => {
+      if (timerDur <= 0) return;
+      if (now - lastDraw >= 80) { lastDraw = now; surf.redraw(); } // ~12fps is plenty
+      if (performance.now() - timerStart < timerDur) timerRaf = requestAnimationFrame(tick);
+      else surf.redraw(); // settle at empty
+    };
+    timerRaf = requestAnimationFrame(tick);
+    surf.redraw();
+  };
+  const clearTimer = () => { timerDur = 0; cancelAnimationFrame(timerRaf); surf.redraw(); };
+
+  surf.setAfterDraw((c) => { drawCursorOverlay(c); drawRevealOverlay(c); drawAimOverlay(c); drawTimerOverlay(c); drawSplatOverlay(c); });
 
   // Map a board UV (u across width, v with 0 at the bottom) to a letter-slot index.
   const slotAtUV = (u: number, v: number): number => {
@@ -1151,6 +1212,7 @@ function makeChalkboard(): Chalkboard {
     writeIn: surf.writeIn, eraseOut: surf.eraseOut,
     splatTomato, clearSplat, setEnd,
     revealLetter, clearReveals, setAim, setAimAll, slotAtUV, setCursorEnabled,
+    setTimer, clearTimer,
   };
 }
 

@@ -244,8 +244,11 @@ export function setupBee(opts: BeeOpts): BeeStage {
   function startAim() {
     chalkAiming = true;
     armedAim = -1;
-    classroom.setBoardAimAll(); // all slots pulse
     document.body.style.cursor = "crosshair";
+    // Mobile: pulse every slot to pick from. Desktop: no all-slots highlight —
+    // the oval just follows the cursor (hover) onto a single slot.
+    if (isTouch) classroom.setBoardAimAll();
+    else classroom.setBoardAim(-1);
   }
   function cancelAim() {
     chalkAiming = false;
@@ -260,7 +263,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
     if (!chalkAiming || isTouch) return;
     const [x, y] = ndcOf(e);
     const idx = classroom.boardSlotAt(x, y, camera);
-    if (idx >= 0) classroom.setBoardAim(idx); else classroom.setBoardAimAll();
+    classroom.setBoardAim(idx); // idx<0 clears the oval (no all-slots on desktop)
     document.body.style.cursor = idx >= 0 ? "pointer" : "crosshair";
   });
   window.addEventListener("pointerdown", (e) => {
@@ -376,23 +379,25 @@ export function setupBee(opts: BeeOpts): BeeStage {
       })
       .catch(() => {});
 
-  // Short keyboard "tick" played on each keystroke (a high-passed noise burst).
-  const playClick = () => {
+  // Short keyboard "tick" (a filtered noise burst). `deep` = a lower, duller thunk
+  // for backspace (low-pass instead of high-pass, a touch longer + louder).
+  const playClick = (deep = false) => {
     try {
       const c = ensureAudio();
-      const len = Math.floor(c.sampleRate * 0.02);
+      const len = Math.floor(c.sampleRate * (deep ? 0.035 : 0.02));
       const buf = c.createBuffer(1, len, c.sampleRate);
       const d = buf.getChannelData(0);
-      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+      const decay = deep ? 2 : 3;
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
       const src = c.createBufferSource();
       src.buffer = buf;
-      const hp = c.createBiquadFilter();
-      hp.type = "highpass";
-      hp.frequency.value = 1600;
+      const filt = c.createBiquadFilter();
+      filt.type = deep ? "lowpass" : "highpass";
+      filt.frequency.value = deep ? 900 : 1600;
       const g = c.createGain();
-      g.gain.value = 0.14;
-      src.connect(hp);
-      hp.connect(g);
+      g.gain.value = deep ? 0.2 : 0.14;
+      src.connect(filt);
+      filt.connect(g);
       g.connect(c.destination);
       src.start();
     } catch {
@@ -588,7 +593,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
       key.dataset.k = ch.toUpperCase(); // drives the iOS-style key-pop preview
       r.appendChild(key);
     }
-    if (ri === 2) r.appendChild(mkKey("⌫", "act", () => { if (amSpeller && !answered && delLetter()) renderGuess(); }));
+    if (ri === 2) r.appendChild(mkKey("⌫", "act", () => { if (amSpeller && !answered && delLetter()) { playClick(true); renderGuess(); } }));
     kbd.appendChild(r);
   });
   // Replay (round, left) + submit (round, right) FABs above the keyboard.
@@ -619,7 +624,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
       e.preventDefault();
       e.stopImmediatePropagation();
     } else if (e.key === "Backspace") {
-      if (delLetter()) renderGuess();
+      if (delLetter()) { playClick(true); renderGuess(); }
       e.preventDefault();
       e.stopImmediatePropagation();
     } else if (/^[a-zA-Z]$/.test(e.key) && !e.metaKey && !e.ctrlKey && !e.altKey) {
@@ -709,6 +714,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
         // The tier is known now, so show the round header straight away.
         classroom.setBoardHeader(`ROUND ${curRound}`, { text: curTier, color: curTierColor });
         classroom.clearBoard(curLength);
+        classroom.clearBoardTimer(); // the bar starts at bee_go
         classroom.setBoardCursorEnabled(amSpeller); // only the speller's own POV blinks the cursor
         classroom.revealBoards();
 
@@ -741,6 +747,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
 
       case "bee_go":
         countdown(m.duration); // timer starts as the word begins playing
+        classroom.setBoardTimer(m.duration); // under-word countdown bar on the board
         if (amSpeller && !answered) statusEl.textContent = "Type the word, then press Enter.";
         break;
 
@@ -754,6 +761,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
 
       case "bee_turn_result": {
         cancelAnimationFrame(timerRaf);
+        classroom.clearBoardTimer();
         timerbar.style.width = "0%";
         kbdTimerbar.style.width = "0%";
         answered = true; // turn resolved — close the touch input row + keyboard
@@ -800,6 +808,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
 
       case "bee_over": {
         cancelAnimationFrame(timerRaf);
+        classroom.clearBoardTimer();
         matchOver = true; // hide the board replay/confirm buttons on the end screen
         const w = m.winnerId as string | null;
         whoEl.textContent = "Game Over";
