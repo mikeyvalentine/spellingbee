@@ -46,10 +46,10 @@ const censor = (t: string): string => {
   return out;
 };
 
-const tierLabel = (t: string) =>
-  ({ easy: "EASY", medium: "MEDIUM", hard: "HARD", veryhard: "VERY HARD", impossible: "IMPOSSIBLE" } as Record<string, string>)[
-    t
-  ] ?? t.toUpperCase();
+const TIER_LABELS: Record<string, string> = {
+  easy: "EASY", medium: "MEDIUM", hard: "HARD", veryhard: "VERY HARD", impossible: "IMPOSSIBLE",
+};
+const tierLabel = (t: string) => TIER_LABELS[t] ?? t.toUpperCase();
 
 // easy = white chalk, medium = yellow, hard and above = red.
 const tierColor = (t: string) =>
@@ -792,10 +792,11 @@ export function setupBee(opts: BeeOpts): BeeStage {
     camera.rotateX(-curMy * MAX_PITCH);
   };
 
-  // The board + camera are static at runtime, so the board's projected screen
-  // corners only change on resize or a phase (camera) change — cache them and
-  // recompute only when dirty, instead of projecting 4 corners every frame.
+  // Project the board's 4 corners to screen space to pin the Replay/Confirm
+  // buttons. The camera now moves each frame (bob/parallax), so this recomputes
+  // per frame in a match — keep its temporaries allocation-free.
   const cornerV = new THREE.Vector3();
+  const CORNER_SIGNS = [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const;
   const blPos = { x: 0, y: 0 }, brPos = { x: 0, y: 0 };
 
   const computeBoardCorners = () => {
@@ -806,8 +807,8 @@ export function setupBee(opts: BeeOpts): BeeStage {
     mesh.updateWorldMatrix(true, false);
     camera.updateMatrixWorld(true); // ensure matrixWorldInverse is current for project()
     let blBest = -Infinity, brBest = -Infinity;
-    for (const [x, y] of [[-hw, -hh], [hw, -hh], [-hw, hh], [hw, hh]]) {
-      cornerV.set(x, y, 0).applyMatrix4(mesh.matrixWorld).project(camera);
+    for (const [sx0, sy0] of CORNER_SIGNS) {
+      cornerV.set(sx0 * hw, sy0 * hh, 0).applyMatrix4(mesh.matrixWorld).project(camera);
       const sx = (cornerV.x * 0.5 + 0.5) * window.innerWidth;
       const sy = (-cornerV.y * 0.5 + 0.5) * window.innerHeight;
       if (sy - sx > blBest) { blBest = sy - sx; blPos.x = sx; blPos.y = sy; }

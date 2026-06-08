@@ -83,6 +83,7 @@ export function makeClipboard(camera: THREE.PerspectiveCamera): ClipboardView {
   let h = 0; // 0..1 hover blend (only matters near peek)
 
   const tmpQuat = new THREE.Quaternion();
+  const tmpEuler = new THREE.Euler();
   const tmpScale = new THREE.Vector3();
   const local = new THREE.Matrix4();
   const ray = new THREE.Raycaster();
@@ -118,7 +119,7 @@ export function makeClipboard(camera: THREE.PerspectiveCamera): ClipboardView {
 
     // World matrix = camera world * local offset (anchors it to the view).
     camera.updateMatrixWorld();
-    local.compose(curPos, tmpQuat.setFromEuler(new THREE.Euler(curRotX, 0, 0)), tmpScale.set(curScale, curScale, curScale));
+    local.compose(curPos, tmpQuat.setFromEuler(tmpEuler.set(curRotX, 0, 0)), tmpScale.set(curScale, curScale, curScale));
     group.matrix.multiplyMatrices(camera.matrixWorld, local);
     group.matrixWorldNeedsUpdate = true;
   };
