@@ -23,7 +23,7 @@ const CHARACTER_URLS = [
 const isInDiscord = () => new URLSearchParams(window.location.search).has("frame_id");
 
 async function main(): Promise<void> {
-  const { scene, camera, renderer, clock, render } = setupScene();
+  const { scene, camera, renderer, clock, render, bloom } = setupScene();
   const avatars = new AvatarManager(scene);
   const clipboard = makeClipboard(camera); // 3D lobby clipboard (placeholder mesh)
   scene.add(clipboard.group);
@@ -108,8 +108,8 @@ async function main(): Promise<void> {
 
   // Dev-only: debug hook + tuning slider panel (lazy — kept out of the prod bundle).
   if (!inDiscord) {
-    (window as any).__dbg = { match, classroom, lobby, localId, renderer, scene, camera, avatars };
-    import("./debug").then((m) => m.setupDebug(classroom)).catch(() => {});
+    (window as any).__dbg = { match, classroom, lobby, localId, renderer, scene, camera, avatars, bloom };
+    import("./debug").then((m) => m.setupDebug(classroom, bloom)).catch(() => {});
   }
 
   renderer.setAnimationLoop(() => {

@@ -11,6 +11,7 @@ export interface SceneContext {
   renderer: THREE.WebGLRenderer;
   clock: THREE.Clock;
   render: () => void; // draws a frame (through the bloom composer on desktop)
+  bloom: UnrealBloomPass | null; // desktop bloom pass (for the debug sliders)
 }
 
 export function setupScene(): SceneContext {
@@ -56,14 +57,18 @@ export function setupScene(): SceneContext {
   // RenderPass draws the scene linearly into the composer; OutputPass applies
   // tone mapping + sRGB at the very end (so colors match the no-bloom path).
   let composer: EffectComposer | null = null;
+  let bloom: UnrealBloomPass | null = null;
   if (!isMobile) {
     composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
-    const bloom = new UnrealBloomPass(
+    // threshold 1.0 sits ABOVE the brightest board content (white chalk text ≈
+    // 0.88 luminance) so the lettering never blooms — only the much brighter
+    // emissive golden chalk (≈1.7) does. Tunable live via the debug panel.
+    bloom = new UnrealBloomPass(
       new THREE.Vector2(window.innerWidth, window.innerHeight),
       0.85, // strength
       0.5, // radius
-      0.85 // threshold — only quite-bright (emissive) pixels bloom
+      1.0 // threshold
     );
     composer.addPass(bloom);
     composer.addPass(new OutputPass());
@@ -82,5 +87,5 @@ export function setupScene(): SceneContext {
     composer?.setSize(window.innerWidth, window.innerHeight);
   });
 
-  return { scene, camera, renderer, clock, render };
+  return { scene, camera, renderer, clock, render, bloom };
 }

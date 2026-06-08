@@ -64,9 +64,26 @@ function rectLightGroup(title: string, l: THREE.RectAreaLight): Group {
   };
 }
 
-export function setupDebug(classroom: Classroom): void {
+// Structural type for the bloom pass (avoids importing the postprocessing module
+// just for a type) — UnrealBloomPass exposes these mutable props.
+interface BloomPass { strength: number; radius: number; threshold: number; }
+
+export function setupDebug(classroom: Classroom, bloom?: BloomPass | null): void {
   const { lights } = classroom;
   const groups: Group[] = [];
+
+  if (bloom) {
+    groups.push({
+      title: "Bloom",
+      sliders: [
+        { label: "strength", min: 0, max: 3, step: 0.01, get: () => bloom.strength, set: (n) => (bloom.strength = n) },
+        { label: "radius", min: 0, max: 1, step: 0.01, get: () => bloom.radius, set: (n) => (bloom.radius = n) },
+        // threshold > brightest board text (~0.88) keeps the lettering from blooming.
+        { label: "threshold", min: 0, max: 1.5, step: 0.01, get: () => bloom.threshold, set: (n) => (bloom.threshold = n) },
+      ],
+      read: () => ({ strength: round(bloom.strength), radius: round(bloom.radius), threshold: round(bloom.threshold) }),
+    });
+  }
 
   groups.push({
     title: "Speller",
