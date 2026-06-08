@@ -151,9 +151,9 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
   let answered = false;
   let timer = null;
 
-  // ---- tomato power-up: splatted cell indices on the current speller's word ----
-  const turnSplats = new Set(); // chalkboard cell indices currently splatted
+  // ---- tomato power-up ----
   const tomatoThrowers = new Set(); // player ids who've thrown this turn (one each)
+  let turnEndsAt = 0; // ms timestamp the current turn's timer ends (for splat duration)
 
   const lobbyState = () => ({
     type: "bee_lobby",
@@ -236,7 +236,6 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
         alive: [...alive],
       });
       if (keyText) sendTo(id, { type: "bee_key", spellerId: speller, text: keyText });
-      if (turnSplats.size) sendTo(id, { type: "bee_splat", spellerId: speller, round, cells: [...turnSplats] });
     }
   };
 
@@ -403,8 +402,8 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
     keyText = ""; // reset the board for spectator catch-up
     turnTypeStart = 0; // reset the WPM clock for this turn
     prevKeyLen = 0;
-    turnSplats.clear(); // fresh board — no tomatoes carry over between turns
-    tomatoThrowers.clear();
+    tomatoThrowers.clear(); // fresh tomato for everyone this turn
+    turnEndsAt = 0;
     const turnRound = round;
     const turnWord = word;
     const turnSpeller = speller;
@@ -438,6 +437,7 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
       // Start the round timer as the word begins playing.
       broadcast({ type: "bee_go", round: turnRound, duration: ROUND_MS });
       clearTimeout(timer);
+      turnEndsAt = Date.now() + ROUND_MS;
       timer = setTimeout(() => resolveTurn(null), ROUND_MS);
       if (isBot(turnSpeller)) botPlay(turnSpeller, turnRound);
     }, 250);
@@ -511,20 +511,17 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
     maybeAutoStart();
   };
 
-  // A waiting (alive, non-speller) player throws a tomato at chalkboard cell
-  // `target`, splatting it + its immediate neighbours (clamped at the word ends).
-  // One throw per player per turn; splats from multiple throwers stack.
-  const throwTomato = (senderId, target) => {
+  // A waiting (alive, non-speller) player throws a tomato — it splats over all but
+  // the last 2 letters of the speller's word and lasts ~75% of the time left in the
+  // turn. One throw per player per turn.
+  const throwTomato = (senderId) => {
     if (phase !== "match" || !speller || senderId === speller) return;
     if (!alive.has(senderId)) return; // spectators / eliminated can't throw
     if (tomatoThrowers.has(senderId)) return; // already threw this turn
-    const n = Math.floor(Number(target));
-    if (!Number.isFinite(n)) return;
-    const len = word.length;
-    const t = Math.max(0, Math.min(len - 1, n));
-    for (let i = Math.max(0, t - 1); i <= Math.min(len - 1, t + 1); i++) turnSplats.add(i);
     tomatoThrowers.add(senderId);
-    broadcast({ type: "bee_splat", spellerId: speller, round, cells: [...turnSplats] });
+    const remaining = turnEndsAt ? Math.max(0, turnEndsAt - Date.now()) : ROUND_MS;
+    const durationMs = Math.round(remaining * 0.75);
+    broadcast({ type: "bee_splat", spellerId: speller, round, durationMs });
   };
 
   // Voluntarily stop playing this match (a "spectate" from the menu): drop out
@@ -585,7 +582,7 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
           }
           break;
         case "bee_tomato":
-          throwTomato(id, m.cell);
+          throwTomato(id);
           break;
         case "bee_spectate":
           spectate(id);

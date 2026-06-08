@@ -74,12 +74,10 @@ export interface Classroom {
   revealBoards(): void;
   /** Erase both boards, one char at a time (during the result pause). */
   hideBoards(onDone?: () => void): void;
-  /** Tomato splats on the word cells (server-driven; shared by all viewers). */
-  setSplats(cells: number[]): void;
-  /** Local-only aiming highlight (target ± 1) while throwing a tomato. */
-  setAim(index: number | null): void;
-  /** Map a board-plane UV hit (from a raycast) to a word-cell index. */
-  boardCellFromUV(u: number, v: number): number | null;
+  /** Throw a tomato: animated splat covering all but the last 2 letters. */
+  splatTomato(durationMs: number): void;
+  /** Cancel any active tomato splat. */
+  clearSplat(): void;
   /** Game-over screen on the main board: a title with an optional subtitle. */
   setEndScreen(title: string, subtitle: string): void;
 }
@@ -124,9 +122,8 @@ export async function loadClassroom(scene: THREE.Scene): Promise<Classroom> {
     hideBoards: (onDone) => {
       board.eraseOut(onDone);
     },
-    setSplats: board.setSplats,
-    setAim: board.setAim,
-    boardCellFromUV: board.cellFromUV,
+    splatTomato: board.splatTomato,
+    clearSplat: board.clearSplat,
     setEndScreen: board.setEnd,
   };
 }
@@ -432,6 +429,53 @@ function pillPath(c: CanvasRenderingContext2D, x: number, y: number, w: number, 
   c.arcTo(x, y, x + w, y, r);
   c.closePath();
 }
+
+// ---- tomato splat shape (a unit splatter, scaled to a half-width/height box) ----
+interface SplatBlobs {
+  main: { x: number; y: number; rx: number; ry: number; rot: number }[];
+  drips: { x: number; len: number; r: number }[];
+  seeds: { x: number; y: number; r: number }[];
+}
+const easeOutBack = (p: number) => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2); };
+const easeInCubic = (p: number) => p * p * p;
+// Random splatter geometry, generated once per throw (so it doesn't flicker).
+function genSplatBlobs(): SplatBlobs {
+  const main: SplatBlobs["main"] = [{ x: 0, y: 0, rx: 1.06, ry: 1.0, rot: 0 }]; // central mass covers the box
+  const lobes = 9 + Math.floor(Math.random() * 4);
+  for (let i = 0; i < lobes; i++) {
+    const a = (i / lobes) * Math.PI * 2 + (Math.random() - 0.5) * 0.6;
+    const rad = 0.72 + Math.random() * 0.5;
+    main.push({ x: Math.cos(a) * rad, y: Math.sin(a) * rad * 0.82, rx: 0.26 + Math.random() * 0.32, ry: 0.24 + Math.random() * 0.3, rot: Math.random() * Math.PI });
+  }
+  const drips: SplatBlobs["drips"] = [];
+  const nd = 3 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < nd; i++) drips.push({ x: (Math.random() * 2 - 1) * 0.85, len: 0.5 + Math.random() * 0.8, r: 0.07 + Math.random() * 0.07 });
+  const seeds: SplatBlobs["seeds"] = [];
+  for (let i = 0; i < 7; i++) seeds.push({ x: (Math.random() * 2 - 1) * 0.68, y: (Math.random() * 2 - 1) * 0.55, r: 0.05 + Math.random() * 0.04 });
+  return { main, drips, seeds };
+}
+function drawSplatShape(c: CanvasRenderingContext2D, halfW: number, halfH: number, b: SplatBlobs) {
+  c.fillStyle = "#b3231a"; // drips behind, dripping downward
+  for (const d of b.drips) {
+    const x = d.x * halfW;
+    c.beginPath();
+    c.ellipse(x, halfH * 0.5 + d.len * halfH * 0.5, d.r * halfW * 1.1, d.len * halfH, 0, 0, Math.PI * 2);
+    c.fill();
+    c.beginPath(); c.arc(x, halfH * 0.5 + d.len * halfH, d.r * halfW * 1.5, 0, Math.PI * 2); c.fill();
+  }
+  c.fillStyle = "#c5281d"; // main mass
+  for (const m of b.main) {
+    c.beginPath();
+    c.ellipse(m.x * halfW, m.y * halfH, m.rx * halfW, m.ry * halfH, m.rot, 0, Math.PI * 2);
+    c.fill();
+  }
+  c.fillStyle = "rgba(150,22,14,0.45)"; // darker centre for depth
+  c.beginPath(); c.ellipse(0, 0, halfW * 0.55, halfH * 0.55, 0, 0, Math.PI * 2); c.fill();
+  c.fillStyle = "rgba(86,12,6,0.7)"; // seeds
+  for (const s of b.seeds) {
+    c.beginPath(); c.ellipse(s.x * halfW, s.y * halfH, Math.max(2, s.r * halfW * 0.5), Math.max(3, s.r * halfH), 0.5, 0, Math.PI * 2); c.fill();
+  }
+}
 interface Surface {
   tex: THREE.CanvasTexture;
   ctx: CanvasRenderingContext2D;
@@ -618,9 +662,8 @@ interface Chalkboard {
   setHeader(text: string, accent?: HeaderAccent | null): void;
   writeIn(onDone?: () => void): void;
   eraseOut(onDone?: () => void): void;
-  setSplats(cells: number[]): void; // tomato splats (server-driven)
-  setAim(index: number | null): void; // local aiming highlight
-  cellFromUV(u: number, v: number): number | null; // raycast hit -> cell index
+  splatTomato(durationMs: number): void; // animated tomato splat
+  clearSplat(): void;
   setEnd(title: string, subtitle: string): void; // game-over screen
 }
 
@@ -639,8 +682,9 @@ function makeChalkboard(): Chalkboard {
   let headerAccent: HeaderAccent | null = null;
   let cells: string[] = [];
   let cellsColor = "#f4f1e8";
-  let splatCells: number[] = []; // tomato splats (from the server — everyone sees)
-  let aimIndex: number | null = null; // local-only aiming highlight (the thrower)
+  // Animated tomato splat (covers all but the last 2 letters — see splatTomato).
+  let splat: { start: number; duration: number; revealMs: number; hideMs: number; cover: number; blobs: SplatBlobs } | null = null;
+  let splatRaf = 0;
   let resultMode: { guess: string; correct: boolean; answer: string } | null = null;
   let endMode: { title: string; subtitle: string } | null = null;
 
@@ -653,45 +697,32 @@ function makeChalkboard(): Chalkboard {
     const yc = H / 2 + 45; // glyph vertical centre
     return { cellW, fontSize, startX, yc };
   };
-  const cellBox = (i: number, n: number) => {
-    const { cellW, fontSize, startX, yc } = cellGeom(n);
-    const h = fontSize * 1.2;
-    return { x: startX + i * cellW, y: yc - h / 2, w: cellW, h };
-  };
-
-  const drawSplat = (c: CanvasRenderingContext2D, b: { x: number; y: number; w: number; h: number }) => {
-    const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
-    const r = Math.max(b.w, b.h) * 0.6;
-    c.save();
-    c.fillStyle = "rgba(190,28,28,0.96)";
-    const blobs = [[0, 0, r], [-r * 0.5, -r * 0.3, r * 0.55], [r * 0.5, r * 0.35, r * 0.5], [r * 0.35, -r * 0.5, r * 0.4], [-r * 0.4, r * 0.45, r * 0.42]];
-    for (const [dx, dy, rad] of blobs) { c.beginPath(); c.arc(cx + dx, cy + dy, rad, 0, Math.PI * 2); c.fill(); }
-    c.fillStyle = "rgba(140,18,18,0.97)";
-    c.beginPath(); c.arc(cx, cy, r * 0.55, 0, Math.PI * 2); c.fill();
-    c.restore();
-  };
-
-  // Drawn on top of the glyphs every frame: server splats (opaque) + the local
-  // aim highlight (target ± 1, clamped).
-  const drawOverlay = (c: CanvasRenderingContext2D) => {
+  // Tomato splat overlay, drawn over the glyphs while active. Reveal grows it
+  // width-wise (scaleX small->large); hide slides it down + fades it out.
+  const drawSplatOverlay = (c: CanvasRenderingContext2D) => {
+    if (!splat) return;
     const n = cells.length;
-    if (!n) return;
-    for (const i of splatCells) {
-      if (i >= 0 && i < n) drawSplat(c, cellBox(i, n));
+    if (n < 1) return;
+    const t = performance.now() - splat.start;
+    const { duration, revealMs, hideMs, cover } = splat;
+    let scaleX = 1, yOff = 0, alpha = 1;
+    if (t < revealMs) {
+      scaleX = Math.max(0.04, easeOutBack(t / revealMs)); // splatter spreads outward
+    } else if (t > duration - hideMs) {
+      const p = Math.min(1, (t - (duration - hideMs)) / hideMs);
+      yOff = easeInCubic(p) * (H * 0.55); // slides down the board
+      alpha = 1 - p; // and fades away
     }
-    if (aimIndex != null) {
-      const lo = Math.max(0, aimIndex - 1), hi = Math.min(n - 1, aimIndex + 1);
-      c.save();
-      c.strokeStyle = "rgba(255,72,60,0.95)";
-      c.lineWidth = 5;
-      c.shadowColor = "rgba(255,40,30,0.75)";
-      c.shadowBlur = 12;
-      for (let i = lo; i <= hi; i++) {
-        const b = cellBox(i, n);
-        c.strokeRect(b.x + 3, b.y + 3, b.w - 6, b.h - 6);
-      }
-      c.restore();
-    }
+    const { cellW, fontSize, startX, yc } = cellGeom(n);
+    const cx = startX + (cover * cellW) / 2;
+    const halfW = (cover * cellW) / 2 + cellW * 0.12;
+    const halfH = fontSize * 0.72;
+    c.save();
+    c.globalAlpha = alpha;
+    c.translate(cx, yc + yOff);
+    c.scale(scaleX, 1);
+    drawSplatShape(c, halfW, halfH, splat.blobs);
+    c.restore();
   };
 
   // A row of glyphs in fixed word-cell columns (n cells, padded with "_"), at a
@@ -761,22 +792,27 @@ function makeChalkboard(): Chalkboard {
     surf.setLines(lines);
   };
 
-  surf.setAfterDraw(drawOverlay);
+  surf.setAfterDraw(drawSplatOverlay);
 
-  const setSplats = (arr: number[]) => { splatCells = arr.slice(); surf.redraw(); };
-  const setAim = (idx: number | null) => { aimIndex = idx; surf.redraw(); };
-  // Map a board UV hit (from a raycast) to a word-cell index, or null if the
-  // click missed the word row.
-  const cellFromUV = (u: number, v: number): number | null => {
-    const n = cells.length;
-    if (!n) return null;
-    const x = u * W, y = (1 - v) * H; // CanvasTexture flipY: v=1 is the canvas top
-    const { cellW, fontSize, startX, yc } = cellGeom(n);
-    const h = fontSize * 1.3;
-    if (y < yc - h / 2 || y > yc + h / 2) return null;
-    const i = Math.floor((x - startX) / cellW);
-    return i >= 0 && i < n ? i : null;
+  // Throw a tomato: splat covers all but the last 2 letters, growing in, holding,
+  // then sliding down + fading over `durationMs`.
+  const splatTomato = (durationMs: number) => {
+    const cover = Math.max(0, cells.length - 2);
+    if (cover <= 0) return;
+    const duration = Math.max(400, durationMs);
+    const revealMs = Math.min(320, duration * 0.3);
+    const hideMs = Math.min(550, duration * 0.4);
+    splat = { start: performance.now(), duration, revealMs, hideMs, cover, blobs: genSplatBlobs() };
+    cancelAnimationFrame(splatRaf);
+    const tick = () => {
+      if (!splat) return;
+      surf.redraw();
+      if (performance.now() - splat.start < splat.duration) splatRaf = requestAnimationFrame(tick);
+      else { splat = null; surf.redraw(); }
+    };
+    splatRaf = requestAnimationFrame(tick);
   };
+  const clearSplat = () => { splat = null; cancelAnimationFrame(splatRaf); surf.redraw(); };
 
   const setGuess = (typed: string, length: number) => {
     resultMode = null; // typing always clears a prior result
@@ -810,7 +846,7 @@ function makeChalkboard(): Chalkboard {
   return {
     mesh, setGuess, setResult, clear, setHeader,
     writeIn: surf.writeIn, eraseOut: surf.eraseOut,
-    setSplats, setAim, cellFromUV, setEnd,
+    splatTomato, clearSplat, setEnd,
   };
 }
 
