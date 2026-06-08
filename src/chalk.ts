@@ -17,7 +17,10 @@ export interface ChalkView {
 
 // Idle pose in camera space (-Z forward). Left of the tomato (which sits at x≈0.74).
 const IDLE = { pos: new THREE.Vector3(0.44, -0.46, -1.35), scale: 0.34 };
-const SPIN_AXIS = new THREE.Vector3(0.28, 1, -0.05).normalize();
+// Spin about the stick's OWN long axis (centered), leaned over the same way the
+// tomato tilts — so it rotates cleanly in place instead of sweeping a pivot.
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+const TILT_DIR = new THREE.Vector3(0.30, 1, 0.06).normalize(); // lean, matching the tomato
 const SPIN_SPEED = 0.85; // rad/s
 const HOVER_SCALE = 0.14;
 const HOVER_GLOW = 0.5;
@@ -27,34 +30,29 @@ const GREY = 0x8d8d93, GREY_TIP = 0xc7c7cc; // "not your turn" disabled look
 
 function buildChalk(): THREE.Group {
   const g = new THREE.Group();
-  // A rough chalk stick: a stubby hexagonal prism, slightly tapered, laid on a
-  // gentle diagonal. Low-poly + a couple of nicks read as "chalk" placeholder.
+  // A rough chalk stick: an UPRIGHT hexagonal prism centered at the origin, so it
+  // spins cleanly about its own long (Y) axis. Low-poly + nicks read as chalk.
   const mat = new THREE.MeshStandardMaterial({
     color: GOLD, roughness: 0.62, metalness: 0.25, emissive: GOLD, emissiveIntensity: 0,
     flatShading: true,
   });
-  const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.2, 1.05, 6, 1), mat);
+  const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.2, 1.0, 6, 1), mat);
   stick.name = "chalkBody";
-  // Lay it diagonally so the spin shows off its length.
-  stick.rotation.set(0, 0, Math.PI * 0.32);
   g.add(stick);
-  // A worn, lighter tip on one end.
+  // A worn, lighter tip on the top end.
   const tip = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.1, 0.17, 0.18, 6, 1),
+    new THREE.CylinderGeometry(0.1, 0.18, 0.16, 6, 1),
     new THREE.MeshStandardMaterial({ color: GOLD_TIP, roughness: 0.5, metalness: 0.1, flatShading: true })
   );
   tip.name = "chalkTip";
-  tip.position.set(Math.cos(Math.PI * 0.82) * 0.55, Math.sin(Math.PI * 0.82) * 0.55, 0);
-  tip.rotation.set(0, 0, Math.PI * 0.32);
+  tip.position.set(0, 0.5, 0);
   g.add(tip);
-  // Tiny chalk-dust nicks for a rough silhouette.
+  // A few nicks OFF the long axis + up the shaft, so the in-place spin reads clearly.
   for (let i = 0; i < 3; i++) {
-    const nick = new THREE.Mesh(
-      new THREE.BoxGeometry(0.08, 0.08, 0.08),
-      mat
-    );
-    const a = Math.PI * 0.32, t = (i - 1) * 0.3;
-    nick.position.set(Math.cos(a + Math.PI / 2) * 0.16 + Math.cos(a) * t, Math.sin(a + Math.PI / 2) * 0.16 + Math.sin(a) * t, 0.12);
+    const nick = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.09), mat);
+    const a = (i / 3) * Math.PI * 2;
+    nick.position.set(Math.cos(a) * 0.18, (i - 1) * 0.24, Math.sin(a) * 0.18);
+    nick.rotation.set(0.4, a, 0.2);
     g.add(nick);
   }
   g.renderOrder = 998;
@@ -88,6 +86,10 @@ export function makeChalk(camera: THREE.PerspectiveCamera, scene: THREE.Scene): 
   const sc = new THREE.Vector3();
   const ray = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
+  // tilt = lean Y over to TILT_DIR; spin = rotate about local Y. Composing
+  // tiltQ * spinQ spins the stick about its own (leaned) long axis, centered.
+  const tiltQ = new THREE.Quaternion().setFromUnitVectors(Y_AXIS, TILT_DIR);
+  const spinQ = new THREE.Quaternion();
 
   const update = (dt: number) => {
     group.visible = visible;
@@ -97,7 +99,8 @@ export function makeChalk(camera: THREE.PerspectiveCamera, scene: THREE.Scene): 
       bodyMat.emissiveIntensity = HOVER_GLOW * eff;
       const s = IDLE.scale * (1 + HOVER_SCALE * eff);
       spin += dt * SPIN_SPEED;
-      spinner.quaternion.setFromAxisAngle(SPIN_AXIS, spin);
+      spinQ.setFromAxisAngle(Y_AXIS, spin);
+      spinner.quaternion.copy(tiltQ).multiply(spinQ);
       camera.updateMatrixWorld();
       local.compose(IDLE.pos, idq, sc.set(s, s, s));
       group.matrix.multiplyMatrices(camera.matrixWorld, local);
