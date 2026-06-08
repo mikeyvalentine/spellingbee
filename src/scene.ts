@@ -1,11 +1,16 @@
 import * as THREE from "three";
 import { RectAreaLightUniformsLib } from "three/examples/jsm/lights/RectAreaLightUniformsLib.js";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 
 export interface SceneContext {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   renderer: THREE.WebGLRenderer;
   clock: THREE.Clock;
+  render: () => void; // draws a frame (through the bloom composer on desktop)
 }
 
 export function setupScene(): SceneContext {
@@ -45,11 +50,37 @@ export function setupScene(): SceneContext {
 
   const clock = new THREE.Clock();
 
+  // --- Bloom (desktop only). A light UnrealBloom pass so the emissive golden
+  // chalk (and other very-bright/emissive bits) gets a soft halo. Skipped on
+  // mobile — post-processing is an extra full-screen pass we don't want there.
+  // RenderPass draws the scene linearly into the composer; OutputPass applies
+  // tone mapping + sRGB at the very end (so colors match the no-bloom path).
+  let composer: EffectComposer | null = null;
+  if (!isMobile) {
+    composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    const bloom = new UnrealBloomPass(
+      new THREE.Vector2(window.innerWidth, window.innerHeight),
+      0.85, // strength
+      0.5, // radius
+      0.85 // threshold — only quite-bright (emissive) pixels bloom
+    );
+    composer.addPass(bloom);
+    composer.addPass(new OutputPass());
+    composer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  const render = () => {
+    if (composer) composer.render();
+    else renderer.render(scene, camera);
+  };
+
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    composer?.setSize(window.innerWidth, window.innerHeight);
   });
 
-  return { scene, camera, renderer, clock };
+  return { scene, camera, renderer, clock, render };
 }

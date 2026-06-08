@@ -23,8 +23,8 @@ const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const TILT_DIR = new THREE.Vector3(0.30, 1, 0.06).normalize(); // lean, matching the tomato
 const SPIN_SPEED = 0.85; // rad/s
 const HOVER_SCALE = 0.14;
-const BASE_GLOW = 0.7; // resting emissive glow (active chalk) — clearly self-lit
-const HOVER_GLOW = 0.6; // extra emissive on hover
+const BASE_GLOW = 1.5; // resting emissive (active chalk) — bright enough to bloom
+const HOVER_GLOW = 1.0; // extra emissive on hover
 
 const GOLD = 0xfff2bf; // white-yellow when available
 const GREY = 0x44444a; // dark grey when "not your turn"

@@ -23,7 +23,7 @@ const CHARACTER_URLS = [
 const isInDiscord = () => new URLSearchParams(window.location.search).has("frame_id");
 
 async function main(): Promise<void> {
-  const { scene, camera, renderer, clock } = setupScene();
+  const { scene, camera, renderer, clock, render } = setupScene();
   const avatars = new AvatarManager(scene);
   const clipboard = makeClipboard(camera); // 3D lobby clipboard (placeholder mesh)
   scene.add(clipboard.group);
@@ -122,7 +122,7 @@ async function main(): Promise<void> {
     lobby.frame(); // position the paper panel over the clipboard
     avatars.setLabelsHidden(clipboard.isFocused()); // hide nametags while the clipboard is up
     avatars.update(dt);
-    renderer.render(scene, camera);
+    render(); // scene → bloom composer (desktop) or direct (mobile)
   });
 }
 
