@@ -18,11 +18,11 @@ export function setupScene(): SceneContext {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
+  renderer.toneMappingExposure = 0.95; // golden-hour re-skin (was 1.0)
   RectAreaLightUniformsLib.init(); // required before any RectAreaLight is shaded
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x10131a);
+  scene.background = new THREE.Color(0x2e1a26); // deep warm plum — golden-hour re-skin (was 0x10131a)
 
   const camera = new THREE.PerspectiveCamera(
     50,
