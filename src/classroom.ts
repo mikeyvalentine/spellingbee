@@ -727,6 +727,11 @@ function makeChalkboard(): Chalkboard {
   const reveals = new Map<number, { letter: string; start: number; prev: string }>();
   let aimIndex = -1; // slot currently highlighted by the chalk aim oval (-1 = none)
   let revealRaf = 0;
+  // Blinking text cursor on the slot awaiting input (leftmost empty, NON-gold slot).
+  const BLINK_MS = 450; // medium blink
+  let cursorIdx = -1;
+  let cursorOn = true;
+  let blinkTimer = 0;
   // Animated tomato splat (covers all but the last 2 letters — see splatTomato).
   let splat: { start: number; duration: number; revealMs: number; hideMs: number; cover: number; blobs: SplatBlobs } | null = null;
   let splatRaf = 0;
@@ -812,6 +817,7 @@ function makeChalkboard(): Chalkboard {
 
   const rebuild = () => {
     const lines: Line[] = [];
+    cursorIdx = -1; // recomputed below only in the live word-cell path
     if (endMode) {
       // Game-over screen: "GAME OVER" with the winner below (no header/cells).
       lines.push({ glyphs: layoutCentered(ctx, [{ text: endMode.title, color: CHALK, font: `700 96px ${FONT}` }], W / 2, 205), noReveal: true });
@@ -819,6 +825,7 @@ function makeChalkboard(): Chalkboard {
         lines.push({ glyphs: layoutCentered(ctx, [{ text: endMode.subtitle, color: CHALK, font: `600 54px ${FONT}` }], W / 2, 330), noReveal: true });
       }
       surf.setLines(lines);
+      manageBlink();
       return;
     }
     if (header) {
@@ -846,6 +853,10 @@ function makeChalkboard(): Chalkboard {
       const font = `700 ${fontSize}px ${FONT}`;
       ctx.font = font;
       const now = performance.now();
+      // The cursor is the leftmost empty, non-gold slot (= the next type target).
+      for (let i = 0; i < n; i++) {
+        if (!reveals.has(i) && (cells[i] ?? "_") === "_") { cursorIdx = i; break; }
+      }
       const glyphs: Glyph[] = [];
       for (let i = 0; i < n; i++) {
         const r = reveals.get(i);
@@ -856,6 +867,7 @@ function makeChalkboard(): Chalkboard {
           const ch = r.letter.toUpperCase();
           glyphs.push({ ch, font, color: GOLD, x: startX + i * cellW + cellW / 2 - ctx.measureText(ch).width / 2, y: yc });
         } else {
+          if (i === cursorIdx) continue; // the blinking-cursor overlay draws this slot
           const ch = cells[i] ?? "_";
           glyphs.push({ ch, font, color: "#f4f1e8", x: startX + i * cellW + cellW / 2 - ctx.measureText(ch).width / 2, y: yc });
         }
@@ -863,6 +875,38 @@ function makeChalkboard(): Chalkboard {
       lines.push({ glyphs });
     }
     surf.setLines(lines);
+    manageBlink();
+  };
+
+  // Run/stop the blink ticker so the cursor slot pulses while one exists.
+  const manageBlink = () => {
+    const want = cursorIdx >= 0 && !resultMode && !endMode;
+    if (want && !blinkTimer) {
+      cursorOn = true;
+      blinkTimer = window.setInterval(() => { cursorOn = !cursorOn; surf.redraw(); }, BLINK_MS);
+    } else if (!want && blinkTimer) {
+      window.clearInterval(blinkTimer);
+      blinkTimer = 0;
+      cursorOn = true;
+    }
+  };
+
+  // Draw the blinking "_" at the awaiting slot (skipped by the base layer).
+  const drawCursorOverlay = (c: CanvasRenderingContext2D) => {
+    if (cursorIdx < 0 || !cursorOn || resultMode || endMode) return;
+    const n = wordLen;
+    if (cursorIdx >= n) return;
+    const { cellW, fontSize, startX, yc } = cellGeom(n);
+    c.save();
+    c.font = `700 ${fontSize}px ${FONT}`;
+    c.textBaseline = "middle";
+    c.textAlign = "left";
+    c.fillStyle = "#f4f1e8";
+    c.shadowColor = "rgba(0,0,0,0.4)";
+    c.shadowBlur = 5;
+    const w = c.measureText("_").width;
+    c.fillText("_", startX + cursorIdx * cellW + cellW / 2 - w / 2, yc);
+    c.restore();
   };
 
   // Golden-chalk reveal crossfade overlay: for each still-fading reveal, fade the
@@ -917,7 +961,7 @@ function makeChalkboard(): Chalkboard {
     c.restore();
   };
 
-  surf.setAfterDraw((c) => { drawRevealOverlay(c); drawAimOverlay(c); drawSplatOverlay(c); });
+  surf.setAfterDraw((c) => { drawCursorOverlay(c); drawRevealOverlay(c); drawAimOverlay(c); drawSplatOverlay(c); });
 
   // Map a board UV (u across width, v with 0 at the bottom) to a letter-slot index.
   const slotAtUV = (u: number, v: number): number => {

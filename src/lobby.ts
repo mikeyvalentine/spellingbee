@@ -118,16 +118,26 @@ export function setupLobby(opts: LobbyOpts): LobbyController {
     clipboard.setHover(over);
     peekEl.classList.toggle("hot", over);
   });
+  const isTouch = window.matchMedia("(pointer: coarse)").matches;
   window.addEventListener("pointerdown", (e) => {
     if (!shown) return;
     const t = e.target as HTMLElement;
-    const onUi = t.closest && (t.closest("#clip-panel") || t.closest("#clip-peek"));
+    const onPanel = !!(t.closest && t.closest("#clip-panel"));
+    const onPeek = !!(t.closest && t.closest("#clip-peek"));
     const [x, y] = ndcOf(e);
     const onClip = clipboard.hitTest(x, y);
     if (clipboard.isFocused()) {
-      if (!onUi && !onClip) clipboard.blur(); // click away closes
-    } else if (onClip) {
-      clipboard.focus(); // click the 3D clipboard to open
+      // Tapping anywhere off the paper panel closes it. (When focused the
+      // clipboard mesh fills the view, so we must NOT treat a mesh hit as "inside"
+      // — only the panel counts, otherwise tap-outside could never register.)
+      if (!onPanel) clipboard.blur();
+    } else {
+      // Open by tapping the clipboard or its peek strip. On touch the visible
+      // clipboard sliver is small, so also open on a tap in the lower half of the
+      // screen (the only thing down there in peek state is the clipboard).
+      const onOtherUi = !!(t.closest && (t.closest("#menu-btn") || t.closest("#menu-panel") || t.closest("#item-menu")));
+      const lowerTap = isTouch && e.clientY > window.innerHeight * 0.5 && !onOtherUi;
+      if (onClip || onPeek || lowerTap) clipboard.focus();
     }
   });
 

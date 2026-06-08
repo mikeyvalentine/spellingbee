@@ -92,6 +92,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
   // ---- golden chalk power-up (speller-only) ----
   let chalkUsedThisMatch = false; // once per match
   let chalkAiming = false; // armed: hovering the board to pick a slot to reveal
+  let armedAim = -1; // touch two-tap: the slot tapped once (tap again to confirm)
   // Per-slot answer model so a mid-word reveal replaces a letter IN PLACE (the
   // player's other letters keep their positions). slots = the player's own letters
   // by slot; gold = chalk-revealed letters by slot; gold always wins a slot.
@@ -235,19 +236,21 @@ export function setupBee(opts: BeeOpts): BeeStage {
   // Chalk aim mode: arm on click, then pick a board slot to reveal.
   function startAim() {
     chalkAiming = true;
+    armedAim = -1;
     classroom.setBoardAim(-1);
     document.body.style.cursor = "crosshair";
   }
   function cancelAim() {
     chalkAiming = false;
+    armedAim = -1;
     classroom.setBoardAim(-1);
     document.body.style.cursor = "";
   }
 
-  // Aim mode: hover the board's letter slots, click one to reveal. (The item menu
-  // itself is plain DOM — native :hover handles its scale/glow.)
+  // Desktop: hover the board's letter slots (the oval follows the cursor), click
+  // one to reveal. Touch has no hover, so it's handled in pointerdown below.
   window.addEventListener("pointermove", (e) => {
-    if (!chalkAiming) return;
+    if (!chalkAiming || isTouch) return;
     const [x, y] = ndcOf(e);
     const idx = classroom.boardSlotAt(x, y, camera);
     classroom.setBoardAim(idx);
@@ -256,11 +259,20 @@ export function setupBee(opts: BeeOpts): BeeStage {
   window.addEventListener("pointerdown", (e) => {
     if (!chalkAiming) return;
     const t = e.target as HTMLElement;
-    if (t.closest && t.closest("#item-menu")) return; // clicking the menu isn't an aim pick
+    if (t.closest && (t.closest("#item-menu") || t.closest("#kbd"))) return; // UI taps aren't aim picks
     const [x, y] = ndcOf(e);
     const idx = classroom.boardSlotAt(x, y, camera);
-    if (idx >= 0) net.sendBee({ type: "bee_chalk", index: idx }); // reveal confirmed on bee_reveal
-    cancelAim(); // a click on empty space cancels without spending it
+    if (isTouch) {
+      // Two-tap: first tap on a slot shows the oval, a second tap on the SAME slot
+      // confirms + reveals. Tapping empty space cancels (without spending it).
+      if (idx < 0) cancelAim();
+      else if (idx === armedAim) { net.sendBee({ type: "bee_chalk", index: idx }); cancelAim(); }
+      else { armedAim = idx; classroom.setBoardAim(idx); }
+    } else {
+      // Desktop: the hover already showed the oval, so a click confirms immediately.
+      if (idx >= 0) net.sendBee({ type: "bee_chalk", index: idx });
+      cancelAim();
+    }
     e.stopPropagation();
   });
   window.addEventListener("keydown", (e) => {
@@ -399,7 +411,9 @@ export function setupBee(opts: BeeOpts): BeeStage {
     cancelAnimationFrame(timerRaf);
     const tick = () => {
       const frac = Math.max(0, (end - performance.now()) / durationMs);
-      timerbar.style.width = `${frac * 100}%`;
+      const pct = `${frac * 100}%`;
+      timerbar.style.width = pct;
+      kbdTimerbar.style.width = pct; // mirror to the on-screen keyboard's timer
       if (frac > 0) timerRaf = requestAnimationFrame(tick);
     };
     tick();
@@ -497,7 +511,9 @@ export function setupBee(opts: BeeOpts): BeeStage {
   // slim bottom bar). On desktop it stays a read-only mirror of the guess — typing
   // is captured globally below so you never have to click to type.
   const isTouch = window.matchMedia("(pointer: coarse)").matches;
-  input.readOnly = !isTouch;
+  // The #m-input is now always a read-only mirror — touch uses the on-screen
+  // keyboard (no device keyboard), desktop captures keys globally.
+  input.readOnly = true;
 
   // No cheating: block copy/cut/paste/drop on the guess field so the word can't be
   // pasted in wholesale (the touch field is editable; desktop's is read-only). The
@@ -539,44 +555,50 @@ export function setupBee(opts: BeeOpts): BeeStage {
     updateMatchHud(); // hide the input row now that the guess is locked
   };
 
-  // Show / lay out the bottom match bar. On touch it's the slim
-  // input + replay + timer bar; on desktop it stays hidden (the 3D board and the
-  // floating Replay button are the only match chrome).
-  const updateMatchHud = () => {
-    if (!isTouch || phase !== "match") {
-      hud.style.display = "none";
-      hud.classList.remove("mobile-bar", "no-input");
-      return;
-    }
-    hud.classList.add("mobile-bar");
-    const showInput = amSpeller && !answered && !amSpectator;
-    hud.classList.toggle("no-input", !showInput);
-    hud.style.display = "flex";
+  // ---- on-screen keyboard (touch only) ----
+  // Replaces the device keyboard: shown on the speller's turn, fills the bottom
+  // third, alphabet + replay + submit. Uses the chalk font on the keys.
+  const kbd = document.getElementById("kbd")!;
+  const kbdTimerbar = document.getElementById("kbd-timerbar")!;
+  const kbType = (ch: string) => {
+    if (phase !== "match" || !amSpeller || answered) return;
+    if (addLetter(ch)) { playClick(); renderGuess(); }
+  };
+  const mkKey = (label: string, cls: string, onTap: () => void) => {
+    const b = document.createElement("button");
+    b.className = "key" + (cls ? " " + cls : "");
+    b.textContent = label;
+    b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); onTap(); });
+    return b;
+  };
+  ["qwertyuiop", "asdfghjkl", "zxcvbnm"].forEach((row, ri) => {
+    const r = document.createElement("div");
+    r.className = "kbd-row";
+    for (const ch of row) r.appendChild(mkKey(ch.toUpperCase(), "", () => kbType(ch)));
+    if (ri === 2) r.appendChild(mkKey("⌫", "act", () => { if (amSpeller && !answered && delLetter()) renderGuess(); }));
+    kbd.appendChild(r);
+  });
+  {
+    const r = document.createElement("div");
+    r.className = "kbd-row";
+    r.appendChild(mkKey("↺", "act replay wide", () => { if (lastBuffer) playBuffer(lastBuffer); }));
+    r.appendChild(mkKey("✓", "act submit wide", () => submit()));
+    kbd.appendChild(r);
+  }
+  const updateKeyboard = () => {
+    kbd.classList.toggle("show", isTouch && phase === "match" && amSpeller && !answered && !amSpectator);
   };
 
-  // Touch typing: the native field is the source of truth. Sanitize to letters,
-  // clamp to the word length, then mirror to the board/spectators.
-  input.addEventListener("input", () => {
-    if (!isTouch || phase !== "match" || !amSpeller || answered) return;
-    // Distribute the native field's letters into the empty (non-gold) slots in order.
-    const raw = input.value.toLowerCase().replace(/[^a-z]/g, "");
-    let ti = 0;
-    for (let i = 0; i < curLength; i++) { if (gold[i]) continue; slots[i] = ti < raw.length ? raw[ti++] : null; }
-    const clamped = raw.slice(0, ti); // clamp the field to what actually fit
-    if (input.value !== clamped) input.value = clamped;
-    pushGuess();
-  });
-  input.addEventListener("keydown", (e) => {
-    if (!isTouch || phase !== "match" || !amSpeller || answered) return;
-    if (e.key === "Enter") {
-      submit();
-      input.blur(); // dismiss the native keyboard once locked in
-      e.preventDefault();
-    }
-  });
+  // The old slim match bar is retired on touch (the keyboard replaces it); the
+  // #match-hud stays hidden on both platforms now.
+  const updateMatchHud = () => {
+    hud.style.display = "none";
+    hud.classList.remove("mobile-bar", "no-input");
+    updateKeyboard();
+  };
 
   // Always-listening key capture for the speller (no focus/click required).
-  // Desktop only — on touch the native field above drives the guess.
+  // Desktop only — on touch the on-screen keyboard drives the guess.
   window.addEventListener("keydown", (e) => {
     if (isTouch) return;
     if (phase !== "match" || !amSpeller || answered) return;
@@ -685,10 +707,9 @@ export function setupBee(opts: BeeOpts): BeeStage {
         statusEl.textContent = amSpeller ? "🔊 Getting your word…" : "";
         aliveEl.textContent = "";
         timerbar.style.width = "100%";
-        updateMatchHud(); // (re)show the slim bar on touch; toggles the input row
+        kbdTimerbar.style.width = "100%";
+        updateMatchHud(); // hide the legacy HUD; (re)show the on-screen keyboard on touch
         updateTomatoBtn(); // show the tomato to eligible waiting players
-        // Raise the native keyboard for the speller on touch devices.
-        if (isTouch && amSpeller) input.focus();
         break;
       }
 
@@ -721,6 +742,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
       case "bee_turn_result": {
         cancelAnimationFrame(timerRaf);
         timerbar.style.width = "0%";
+        kbdTimerbar.style.width = "0%";
         answered = true; // turn resolved — close the touch input row + keyboard
         updateMatchHud();
         if (isTouch) input.blur();
