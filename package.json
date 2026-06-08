@@ -1,0 +1,26 @@
+{
+  "name": "spelling-bee",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "server": "node server/index.js"
+  },
+  "dependencies": {
+    "@discord/embedded-app-sdk": "^1.9.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "kokoro-js": "^1.2.1",
+    "three": "^0.169.0",
+    "wordlist-js": "^2.0.0",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.169.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}
