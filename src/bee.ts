@@ -545,8 +545,8 @@ export function setupBee(opts: BeeOpts): BeeStage {
         window.setTimeout(() => classroom.hideBoards(), 500);
         // Wrong answer → the speller plays a one-shot reaction (duck, or punch if
         // they have no duck clip) that finishes just before the next round starts.
-        if (!m.correct && !avatars.playEmote(m.spellerId, "duck")) {
-          avatars.playEmote(m.spellerId, "punch");
+        if (!m.correct && !avatars.playEmote(m.spellerId, "duck", false, 1.5)) {
+          avatars.playEmote(m.spellerId, "punch", false, 1.5);
         }
         if (m.spellerId === localId) {
           statusEl.textContent = m.correct

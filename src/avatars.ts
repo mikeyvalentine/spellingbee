@@ -401,7 +401,7 @@ export class AvatarManager {
   /** Plays a one-shot emote. Returns false (without playing) if the model lacks
    *  the clip, so callers can fall back to another emote. With `hold`, the final
    *  pose is held (clamped) until clearEmote() is called. */
-  playEmote(id: string, emote: string, hold = false): boolean {
+  playEmote(id: string, emote: string, hold = false, stretch = 1): boolean {
     const a = this.avatars.get(id);
     if (!a || a.airborne) return false;
     const state = emote as AnimState;
@@ -411,13 +411,15 @@ export class AvatarManager {
     if (a.emote && a.emote !== state) a.actions[a.emote]?.stop();
     if (a.state === state) a.state = "idle"; // force transitionTo to restart this clip
     action.reset();
+    // Stretch playback to last `stretch`x longer (e.g. the wrong-answer duck).
+    action.setEffectiveTimeScale(stretch > 0 ? 1 / stretch : 1);
     a.emote = state;
     a.emoteHold = hold;
     const dur = action.getClip().duration;
     // Held emotes freeze at ~halfway (the crouch/extension peak), not the clip's
     // end (which returns to a neutral, near-standing pose).
     a.emoteHoldTime = hold ? dur * 0.5 : Infinity;
-    a.emoteUntil = hold ? Infinity : performance.now() / 1000 + dur;
+    a.emoteUntil = hold ? Infinity : performance.now() / 1000 + dur * stretch;
     return true;
   }
 
