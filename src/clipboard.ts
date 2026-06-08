@@ -34,7 +34,9 @@ const POSE = {
 };
 
 // Paper size relative to the board (used for the focused screen-rect projection).
-const PAPER_W = 1.02, PAPER_H = 1.36, PAPER_LOCAL_Y = 0.02;
+// A touch wider than before so the focused HTML controls have slack and headers
+// don't briefly wrap as the panel finishes opening.
+const PAPER_W = 1.1, PAPER_H = 1.36, PAPER_LOCAL_Y = 0.02;
 
 function buildPlaceholder(): { group: THREE.Group; paper: THREE.Mesh } {
   const group = new THREE.Group();
@@ -129,7 +131,7 @@ export function makeClipboard(camera: THREE.PerspectiveCamera): ClipboardView {
   };
 
   const paperRect = () => {
-    if (!visible || t < 0.97) return null; // only when focused + settled
+    if (!visible || t < 0.992) return null; // only once essentially settled (no width reflow)
     paper.updateWorldMatrix(true, false);
     camera.updateMatrixWorld();
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;

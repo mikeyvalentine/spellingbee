@@ -136,6 +136,25 @@ export function setupBee(opts: BeeOpts): BeeStage {
   } as any);
   document.body.appendChild(specBanner);
 
+  // Simple "Spectating" label, bottom-center of the screen.
+  const specBottom = document.createElement("div");
+  specBottom.id = "spectator-bottom";
+  specBottom.textContent = "👀 Spectating";
+  Object.assign(specBottom.style, {
+    position: "fixed", bottom: "16px", left: "50%", transform: "translateX(-50%)",
+    zIndex: "16", display: "none", padding: "6px 14px", borderRadius: "999px",
+    background: "rgba(12,15,22,0.72)", color: "#ffd23b", border: "1px solid #2a3344",
+    font: "600 13px system-ui, sans-serif", letterSpacing: "0.02em",
+    boxShadow: "0 4px 16px rgba(0,0,0,0.45)", pointerEvents: "none",
+  } as any);
+  document.body.appendChild(specBottom);
+
+  // Toggle both spectator indicators together.
+  const setSpec = (on: boolean) => {
+    specBanner.style.display = on ? "block" : "none";
+    specBottom.style.display = on ? "block" : "none";
+  };
+
   // Replay button pinned to the chalkboard's bottom-LEFT corner.
   const boardReplay = document.createElement("button");
   boardReplay.id = "board-replay";
@@ -262,7 +281,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
     amSpectator = true;
     amSpeller = false;
     answered = true;
-    specBanner.style.display = "block";
+    setSpec(true);
     updateMatchHud();
     updateTomatoBtn();
   };
@@ -439,7 +458,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
     cancelAnimationFrame(timerRaf);
     activeSpeller = null;
     amSpectator = false;
-    specBanner.style.display = "none";
+    setSpec(false);
     seatOrder = queue;
     classroom.root.visible = true;
     boardReplay.style.display = "none";
@@ -458,7 +477,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
     matchOver = false;
     seatOrder = order.length ? order : seatOrder;
     amSpectator = order.length > 0 && !order.includes(localId);
-    specBanner.style.display = amSpectator ? "block" : "none";
+    setSpec(amSpectator);
     activeSpeller = null;
     chalkUsedThisMatch = false; // fresh golden chalk for the new match
     slots = []; gold = [];
@@ -730,7 +749,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
         updateMatchHud();
         updateTomatoBtn();
         if (isTouch) input.blur();
-        specBanner.style.display = "none";
+        setSpec(false);
         // The server reopens the lobby itself a few seconds later (returnToLobby).
         break;
       }
