@@ -7,30 +7,40 @@ export interface NetClient {
   onLeave(cb: (id: string) => void): void;
   /** Fires every time the socket (re)connects and has sent its hello. */
   onReady(cb: () => void): void;
+  /** Reconnect to a different game room (private call <-> public matchmaking). */
+  setRoom(roomKey: string): void;
+  /** The room currently connected to. */
+  currentRoom(): string;
 }
 
 /**
  * WebSocket transport. Carries the server-assigned character model for each
- * player plus all Spelling Bee game messages (lobby + match). Auto-reconnects.
+ * player plus all Spelling Bee game messages (lobby + match). Auto-reconnects,
+ * and can hop between rooms (per-call vs public matchmaking) via setRoom().
  */
 export function connectNet(
-  url: string,
+  baseUrl: string,
   localId: string,
-  modelCount: number
+  modelCount: number,
+  initialRoom: string
 ): NetClient {
   let ws: WebSocket | null = null;
+  let room = initialRoom;
   let modelCb: ModelCb = () => {};
   let beeCb: (msg: any) => void = () => {};
   let leaveCb: (id: string) => void = () => {};
   let readyCb: () => void = () => {};
 
+  const url = () => `${baseUrl}?room=${encodeURIComponent(room)}`;
+
   const connect = () => {
-    ws = new WebSocket(url);
-    ws.onopen = () => {
-      ws?.send(JSON.stringify({ type: "hello", id: localId, count: modelCount }));
+    const sock = new WebSocket(url());
+    ws = sock;
+    sock.onopen = () => {
+      sock.send(JSON.stringify({ type: "hello", id: localId, count: modelCount }));
       readyCb();
     };
-    ws.onmessage = (ev) => {
+    sock.onmessage = (ev) => {
       try {
         const m = JSON.parse(ev.data as string);
         switch (m.type) {
@@ -55,8 +65,12 @@ export function connectNet(
         /* ignore malformed frames */
       }
     };
-    ws.onclose = () => setTimeout(connect, 1500); // auto-reconnect
-    ws.onerror = () => ws?.close();
+    // Only auto-reconnect if this socket is still the active one (a room switch
+    // detaches it first, so its close must NOT trigger a reconnect to the old room).
+    sock.onclose = () => {
+      if (ws === sock) setTimeout(connect, 1500);
+    };
+    sock.onerror = () => sock.close();
   };
   connect();
 
@@ -78,5 +92,18 @@ export function connectNet(
     onReady(cb) {
       readyCb = cb;
     },
+    setRoom(newRoom) {
+      if (newRoom === room) return;
+      room = newRoom;
+      const old = ws;
+      ws = null; // detach so old.onclose won't reconnect to the previous room
+      try {
+        old?.close();
+      } catch {
+        /* ignore */
+      }
+      connect();
+    },
+    currentRoom: () => room,
   };
 }

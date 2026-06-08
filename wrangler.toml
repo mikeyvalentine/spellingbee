@@ -11,14 +11,23 @@ binding = "ASSETS"
 run_worker_first = true
 not_found_handling = "single-page-application"
 
-# The game room. SQLite-backed Durable Object class -> available on the free plan.
+# Game rooms + the public-matchmaking coordinator. SQLite-backed Durable Object
+# classes -> available on the free plan.
 [[durable_objects.bindings]]
 name = "BEE_ROOM"
 class_name = "BeeRoom"
 
+[[durable_objects.bindings]]
+name = "MATCHMAKER"
+class_name = "Matchmaker"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["BeeRoom"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Matchmaker"]
 
 # Non-secret config. The Discord *Client ID* is public (it's also baked into the
 # client bundle). Secrets — DISCORD_CLIENT_SECRET and GOOGLE_TTS_API_KEY — are NOT

@@ -64,16 +64,15 @@ async function main(): Promise<void> {
     (inDiscord
       ? `wss://${window.location.host}/.proxy/ws`
       : `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws`);
-  // Route to this client's room: Discord => its call's private room; otherwise a
-  // dev default. Public matchmaking later reconnects with a different room key.
-  const wsUrl = `${wsBase}?room=${encodeURIComponent(source.roomKey)}`;
-  const net = connectNet(wsUrl, localId, avatars.modelCount);
+  // Start in this client's room: Discord => its call's private room; otherwise a
+  // dev default. Public matchmaking reconnects to a `pub:<id>` room via setRoom.
+  const net = connectNet(wsBase, localId, avatars.modelCount, source.roomKey);
   // Models are assigned deterministically by seat/chair (see CHAIR_MODELS in
   // bee.ts), so we ignore the server's per-player model assignment here.
   net.onLeave((id) => avatars.removePlayer(id));
 
   // ---- lobby + match ----
-  const lobby = setupLobby({ net, localId, getName, isMock: !inDiscord });
+  const lobby = setupLobby({ net, localId, getName, isMock: !inDiscord, callRoomKey: source.roomKey });
   const match = setupBee({ net, localId, getName, camera, avatars, classroom });
   lobby.show(); // landing screen while we connect
 
@@ -90,6 +89,9 @@ async function main(): Promise<void> {
         break;
       case "bee_match_start":
         lobby.hide();
+        break;
+      case "bee_countdown":
+        lobby.onCountdown(m);
         break;
     }
   });

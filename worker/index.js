@@ -11,6 +11,9 @@
 import { configureTts, previewMp3, setVoice } from "../server/tts.js";
 
 export { BeeRoom } from "./room.js";
+export { Matchmaker } from "./matchmaker.js";
+
+const mm = (env) => env.MATCHMAKER.get(env.MATCHMAKER.idFromName("global"));
 
 // Keep room names bounded + predictable (idFromName accepts anything, but we
 // don't want unbounded/garbage keys). Falls back to one shared default room.
@@ -66,6 +69,11 @@ export default {
     if (p === "/healthz") return new Response("ok");
     if (p === "/api/token" && request.method === "POST") return handleToken(request, env);
     if (p === "/api/voice-preview") return handleVoicePreview(url, env);
+
+    // Public matchmaking: quick-match / create return a room id; list = browser.
+    if (p === "/api/mm/quick") return mm(env).fetch(new Request("https://mm/quick"));
+    if (p === "/api/mm/create") return mm(env).fetch(new Request("https://mm/create"));
+    if (p === "/api/mm/list") return mm(env).fetch(new Request("https://mm/list"));
 
     if (p === "/ws") {
       // Route to the requested room: `call:<instanceId>` (private per Discord

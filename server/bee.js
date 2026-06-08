@@ -87,7 +87,15 @@ const tierForLap = (lap, players) => {
   return "impossible";
 };
 
-export function createBee(broadcast, sendTo, getPlayerIds) {
+export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
+  // Public rooms auto-start (drop-in): once `minPlayers` are present, a countdown
+  // runs and the match begins with no host action. Private rooms leave autoStart
+  // off and keep the host-driven start.
+  const { autoStart = false, minPlayers = 2 } = opts;
+  const AUTO_COUNTDOWN_MS = 8000;
+  let countdownTimer = null;
+  let countdownEnd = 0;
+
   let phase = "idle"; // idle | lobby | match
   let hostId = null;
   let queue = []; // join order
@@ -161,6 +169,7 @@ export function createBee(broadcast, sendTo, getPlayerIds) {
     bots.clear();
     clearTimeout(timer);
     timer = null;
+    clearCountdown();
   };
 
   const usedWords = new Set(); // words already spelled this match (no repeats)
@@ -230,6 +239,7 @@ export function createBee(broadcast, sendTo, getPlayerIds) {
     }
     if (!queue.includes(id)) queue.push(id);
     sendLobby();
+    maybeAutoStart();
   };
 
   const leave = (id) => {
@@ -238,6 +248,7 @@ export function createBee(broadcast, sendTo, getPlayerIds) {
     if (id === hostId) hostId = queue[0] || null;
     if (queue.length === 0) reset();
     sendLobby();
+    maybeAutoStart();
   };
 
   const addBots = (n) => {
@@ -281,8 +292,8 @@ export function createBee(broadcast, sendTo, getPlayerIds) {
     setTimeout(step, 800 + Math.random() * 700);
   };
 
-  const startMatch = (id, requestedMode) => {
-    if (phase !== "lobby" || id !== hostId || queue.length < 1) return;
+  const doStart = (requestedMode) => {
+    clearCountdown();
     order = [...queue];
     mode = requestedMode || "basic";
     alive = new Set(order);
@@ -298,6 +309,41 @@ export function createBee(broadcast, sendTo, getPlayerIds) {
     // after broadcasting bee_turn, so the speller appears immediately.
     if (advanceAndPrepare(false)) setTimeout(beginTurn, 600);
     else endMatch();
+  };
+
+  const startMatch = (id, requestedMode) => {
+    if (phase !== "lobby" || id !== hostId || queue.length < 1) return;
+    doStart(requestedMode);
+  };
+
+  // ---- public-room auto-start (drop-in) ----
+  const sendCountdown = (cancelled = false) => {
+    const ms = cancelled ? 0 : Math.max(0, countdownEnd - Date.now());
+    broadcast({ type: "bee_countdown", ms, seconds: Math.ceil(ms / 1000), cancelled });
+  };
+  const clearCountdown = () => {
+    if (countdownTimer) clearTimeout(countdownTimer);
+    countdownTimer = null;
+    countdownEnd = 0;
+  };
+  // Re-evaluate whether a public lobby should be counting down. Called whenever
+  // the lobby population changes.
+  const maybeAutoStart = () => {
+    if (!autoStart || phase !== "lobby") return;
+    if (queue.length >= minPlayers) {
+      if (!countdownTimer) {
+        countdownEnd = Date.now() + AUTO_COUNTDOWN_MS;
+        countdownTimer = setTimeout(() => {
+          countdownTimer = null;
+          countdownEnd = 0;
+          if (phase === "lobby" && queue.length >= minPlayers) doStart("basic");
+        }, AUTO_COUNTDOWN_MS);
+      }
+      sendCountdown(); // (re)broadcast remaining time, syncing any late joiners
+    } else if (countdownTimer) {
+      clearCountdown();
+      sendCountdown(true); // dropped below the minimum — abort the countdown
+    }
   };
 
   // Advance to the next alive speller, pick their word, and PRE-GENERATE its
@@ -426,7 +472,9 @@ export function createBee(broadcast, sendTo, getPlayerIds) {
   const returnToLobby = () => {
     bots.clear();
     const connected = new Set(getPlayerIds());
-    queue = order.filter((p) => connected.has(p));
+    // Public rooms: everyone still connected (including mid-match spectators)
+    // rolls into the next match. Private rooms: just the prior players.
+    queue = autoStart ? [...connected] : order.filter((p) => connected.has(p));
     ready = new Set();
     order = [];
     alive = new Set();
@@ -439,9 +487,11 @@ export function createBee(broadcast, sendTo, getPlayerIds) {
     keyText = "";
     clearTimeout(timer);
     timer = null;
+    clearCountdown();
     phase = queue.length ? "lobby" : "idle";
     if (!queue.includes(hostId)) hostId = queue[0] || null;
     sendLobby();
+    maybeAutoStart();
   };
 
   return {
