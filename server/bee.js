@@ -74,16 +74,14 @@ const POOLS = {
   impossible: buildPool(hardBands, 12, 20),
 };
 
-// Difficulty ramps by LAP (each alive player having spelled once). The easy
-// phase is kept to roughly a constant number of TURNS regardless of player count
-// (a lap = one turn per player), so a big match doesn't sit on easy words for
-// dozens of turns; later tiers each advance one lap.
-const tierForLap = (lap, players) => {
-  const easyLaps = Math.max(1, Math.round(7 / Math.max(1, players)));
-  if (lap <= easyLaps) return "easy";
-  if (lap <= easyLaps + 1) return "medium";
-  if (lap <= easyLaps + 2) return "hard";
-  if (lap <= easyLaps + 3) return "veryhard";
+// Difficulty ramps by ROUND (a lap = every alive player spelling once). Fixed
+// schedule, identical for every lobby size:
+//   Rounds 1-2 easy · 3 medium · 4 hard · 5 very hard · 6+ impossible
+const tierForLap = (lap) => {
+  if (lap <= 2) return "easy";
+  if (lap === 3) return "medium";
+  if (lap === 4) return "hard";
+  if (lap === 5) return "veryhard";
   return "impossible";
 };
 
@@ -379,7 +377,7 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
     if (turnIdx <= prevIdx) lap++; // wrapped back to the start of the order
     speller = order[turnIdx];
     round++;
-    currentTier = tierForLap(lap, order.length);
+    currentTier = tierForLap(lap);
     // Round 1 uses a pre-synthesized easy word (instant audio, no opening pause),
     // randomized and avoiding a back-to-back repeat across matches.
     if (round === 1 && FIRST_WORDS.length) {
