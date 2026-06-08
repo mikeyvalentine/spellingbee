@@ -418,6 +418,19 @@ interface Line {
   underlineY?: number;
   strikeY?: number; // horizontal line through the glyphs (wrong-answer strikethrough)
   noReveal?: boolean; // always fully shown — exempt from the write-in/erase reveal
+  pill?: string; // solid rounded background behind the glyphs (the speller's name pill)
+}
+
+// Rounded-rect (pill) path.
+function pillPath(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  r = Math.min(r, h / 2, w / 2);
+  c.beginPath();
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y, x + w, y + h, r);
+  c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r);
+  c.arcTo(x, y, x + w, y, r);
+  c.closePath();
 }
 interface Surface {
   tex: THREE.CanvasTexture;
@@ -452,6 +465,29 @@ function makeSurface(w: number, h: number): Surface {
     ctx.textAlign = "left";
     for (const line of lines) {
       const n = line.noReveal ? line.glyphs.length : Math.min(reveal, line.glyphs.length);
+      // Solid pill background behind the glyphs (the current speller's name).
+      if (line.pill && n > 0) {
+        let minX = Infinity, maxX = -Infinity, fs = 40;
+        for (let i = 0; i < n; i++) {
+          const g = line.glyphs[i];
+          ctx.font = g.font;
+          minX = Math.min(minX, g.x);
+          maxX = Math.max(maxX, g.x + ctx.measureText(g.ch).width);
+          const m = /(\d+(?:\.\d+)?)px/.exec(g.font);
+          if (m) fs = parseFloat(m[1]);
+        }
+        const padX = fs * 0.55, padY = fs * 0.34;
+        const px = minX - padX, pw = maxX - minX + padX * 2, ph = fs + padY * 2;
+        const py = line.glyphs[0].y - ph / 2;
+        ctx.save();
+        ctx.shadowColor = "rgba(0,0,0,0.35)";
+        ctx.shadowBlur = 8;
+        ctx.shadowOffsetY = 3;
+        pillPath(ctx, px, py, pw, ph, ph / 2);
+        ctx.fillStyle = line.pill;
+        ctx.fill();
+        ctx.restore();
+      }
       ctx.shadowColor = "rgba(0,0,0,0.4)";
       ctx.shadowBlur = 5;
       for (let i = 0; i < n; i++) {
@@ -812,9 +848,10 @@ function makeStatsBoard(): StatsBoard {
     if (!state) return surf.setLines([]);
     // Name on top (white, underlined); WPM + ACC stacked on two rows below, high
     // enough that the seated avatar doesn't cover them.
-    const nameGlyphs = layoutCentered(ctx, [{ text: state.name, color: "rgba(244,241,232,0.95)", font: `700 52px ${FONT}` }], W / 2, 72);
+    // The current speller's name: black on a solid yellow pill (no underline).
+    const nameGlyphs = layoutCentered(ctx, [{ text: state.name, color: "#1b1b1b", font: `700 52px ${FONT}` }], W / 2, 80);
     surf.setLines([
-      { glyphs: nameGlyphs, underlineY: 110 },
+      { glyphs: nameGlyphs, pill: "#ffd23b" },
       statRow("WPM", String(state.wpm), 224),
       statRow("ACC", `${state.acc}%`, 326),
     ]);

@@ -167,6 +167,20 @@
       #m-status { margin-top: 9px; min-height: 1.2em; font-size: 14px; }
       #m-alive { font-size: 12px; color: var(--muted); margin-top: 2px; }
 
+      /* ---------- Board corner buttons (replay / confirm) ---------- */
+      /* left/top are set per-frame in JS; the anchoring transform + hover live here. */
+      #board-replay, #board-check { transition: transform 0.12s ease, filter 0.12s ease; }
+      #board-replay { transform: translate(10px, calc(-100% - 4px)); transform-origin: left bottom; }
+      #board-replay:hover {
+        transform: translate(10px, calc(-100% - 4px)) scale(1.12);
+        filter: drop-shadow(0 0 5px rgba(255,255,255,0.4));
+      }
+      #board-check { transform: translate(calc(-100% - 10px), calc(-100% - 2px)); transform-origin: right bottom; }
+      #board-check:hover {
+        transform: translate(calc(-100% - 10px), calc(-100% - 2px)) scale(1.12);
+        filter: drop-shadow(0 0 6px rgba(255,255,255,0.5));
+      }
+
       /* ---------- Top-right universal menu ---------- */
       #menu-btn {
         position: fixed; top: 14px; right: 14px; z-index: 30;

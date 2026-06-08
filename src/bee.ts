@@ -107,8 +107,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
   boardReplay.textContent = "↺ Replay"; // round replay arrow + chalk text
   Object.assign(boardReplay.style, {
     position: "fixed", zIndex: "15", display: "none",
-    // Anchored at the board's bottom-left corner, nudged inward.
-    transform: "translate(10px, calc(-100% - 4px))",
+    // Anchoring transform + hover live in CSS (#board-replay) so :hover can add scale.
     background: "none", border: "0", padding: "0", cursor: "pointer",
     // Styled like the muted "ROUND X" header: greyer chalk, a bit smaller.
     color: "rgba(244,241,232,0.55)",
@@ -128,9 +127,9 @@ export function setupBee(opts: BeeOpts): BeeStage {
   boardCheck.title = "Confirm your word (Enter)";
   Object.assign(boardCheck.style, {
     position: "fixed", zIndex: "15", display: "none",
-    transform: "translate(calc(-100% - 10px), calc(-100% - 2px))",
+    // Anchoring transform + hover live in CSS (#board-check).
     background: "none", border: "0", padding: "0", cursor: "pointer",
-    color: "#9ff58a", // green = confirm
+    color: "#f4f1e8", // white chalk
     font: "700 32px 'ABC Stefan Simple', system-ui, sans-serif",
     textShadow: "0 2px 5px rgba(0,0,0,0.5)",
   } as any);
