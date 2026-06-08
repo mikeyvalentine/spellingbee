@@ -26,9 +26,11 @@ export interface ClipboardView {
 // Local (camera-space) poses. -Z is into the screen. Tuned by eye — expect to
 // nudge these once it's on screen.
 const POSE = {
-  peek: { pos: new THREE.Vector3(0, -1.62, -2.1), rotX: 0.62, scale: 1.0 },
-  hover: { pos: new THREE.Vector3(0, -1.42, -2.05), rotX: 0.55, scale: 1.02 },
-  focus: { pos: new THREE.Vector3(0, -0.18, -1.5), rotX: 0.02, scale: 1.18 },
+  // Negative rotX tilts the TOP away from the camera (leaning back). Focus faces
+  // the camera flat (rotX 0) so the HTML paper lines up cleanly + larger.
+  peek: { pos: new THREE.Vector3(0, -1.62, -2.1), rotX: -0.32, scale: 1.0 },
+  hover: { pos: new THREE.Vector3(0, -1.42, -2.05), rotX: -0.26, scale: 1.02 },
+  focus: { pos: new THREE.Vector3(0, -0.05, -1.28), rotX: 0.0, scale: 1.52 },
 };
 
 // Paper size relative to the board (used for the focused screen-rect projection).

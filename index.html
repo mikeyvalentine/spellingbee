@@ -236,7 +236,9 @@
         transition: transform 0.16s ease; white-space: nowrap;
       }
       #clip-peek.show { display: block; }
-      #clip-peek:hover { transform: translateX(-50%) translateY(-5px); }
+      /* Unified hover: hovering the strip OR the 3D clipboard raises both (lobby.ts toggles .hot). */
+      #clip-peek.hot { transform: translateX(-50%) translateY(-6px); }
+      #clip-peek #clip-peek-text { font: 700 19px "ABC Stefan Simple", system-ui, sans-serif; letter-spacing: 0.3px; }
       #clip-peek .cp-peek-hint { color: var(--muted); font-weight: 500; font-size: 12px; margin-left: 10px; }
 
       #clip-panel { position: fixed; z-index: 21; display: none; flex-direction: column; }
@@ -249,15 +251,15 @@
       #clip-paper {
         flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
         background: #f4efe2; color: #2a2620; border-radius: 7px;
-        padding: 16px 20px 20px; box-shadow: 0 18px 50px rgba(0,0,0,0.55);
+        padding: 13px 18px 15px; box-shadow: 0 18px 50px rgba(0,0,0,0.55);
         font-family: system-ui, sans-serif;
       }
-      .cp-header { font: 800 20px system-ui, sans-serif; margin-bottom: 12px; }
-      .cp-header .cp-count { color: #6a6256; font-weight: 600; font-size: 14px; }
+      .cp-header { font: 600 30px "ABC Stefan Simple", system-ui, sans-serif; letter-spacing: 0.3px; margin-bottom: 6px; }
+      .cp-header .cp-count { color: #6a6256; font: 700 15px system-ui, sans-serif; }
       .cp-cd { color: #b8860b; font-weight: 700; font-size: 13px; margin-left: 8px; }
-      .cp-section { border-top: 1px solid #d9d2c2; padding: 12px 0; }
-      .cp-label { font: 700 12px system-ui, sans-serif; text-transform: uppercase; letter-spacing: 0.5px; color: #8a8170; margin-bottom: 8px; }
-      .cp-srow { display: flex; align-items: center; justify-content: space-between; margin: 7px 0; gap: 10px; }
+      .cp-section { border-top: 1px solid #d9d2c2; padding: 9px 0; }
+      .cp-label { font: 700 12px system-ui, sans-serif; text-transform: uppercase; letter-spacing: 0.5px; color: #8a8170; margin-bottom: 6px; }
+      .cp-srow { display: flex; align-items: center; justify-content: space-between; margin: 5px 0; gap: 10px; }
       .cp-srow > label { font-weight: 600; font-size: 14px; }
       .cp-srow select, .cp-srow .cp-stepper, .cp-srow .cp-toggle { font-size: 14px; }
       .cp-srow select { padding: 6px 8px; border-radius: 8px; border: 1px solid #c9c1b0; background: #fff; color: #2a2620; }
@@ -274,7 +276,7 @@
       .cp-prow { display: flex; align-items: center; gap: 7px; font-size: 14px; }
       .cp-prow .cp-tick { width: 16px; }
       .cp-prow .cp-name.host { color: #2a6df0; font-weight: 800; }
-      .cp-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 12px; }
+      .cp-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 8px; }
       .cp-actions .cpb {
         font: 700 14px system-ui, sans-serif; border: 0; border-radius: 9px;
         padding: 11px 16px; cursor: pointer; color: #2a2010; background: var(--bee); flex: 1 1 auto;

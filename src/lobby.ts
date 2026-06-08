@@ -109,9 +109,14 @@ export function setupLobby(opts: LobbyOpts): LobbyController {
   peekEl.addEventListener("click", () => clipboard.focus());
   closeBtn.addEventListener("click", () => clipboard.blur());
   window.addEventListener("pointermove", (e) => {
-    if (!shown || clipboard.isFocused()) { clipboard.setHover(false); return; }
+    if (!shown || clipboard.isFocused()) { clipboard.setHover(false); peekEl.classList.remove("hot"); return; }
+    // One combined hover zone: the peek strip OR the 3D clipboard raises both.
+    const t = e.target as HTMLElement;
+    const overPeek = !!(t.closest && t.closest("#clip-peek"));
     const [x, y] = ndcOf(e);
-    clipboard.setHover(clipboard.hitTest(x, y));
+    const over = overPeek || clipboard.hitTest(x, y);
+    clipboard.setHover(over);
+    peekEl.classList.toggle("hot", over);
   });
   window.addEventListener("pointerdown", (e) => {
     if (!shown) return;
