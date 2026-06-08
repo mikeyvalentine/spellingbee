@@ -107,8 +107,8 @@ export function setupBee(opts: BeeOpts): BeeStage {
   boardReplay.textContent = "↺ Replay"; // round replay arrow + chalk text
   Object.assign(boardReplay.style, {
     position: "fixed", zIndex: "15", display: "none",
-    // Tucked closer into the board's bottom-right corner.
-    transform: "translate(calc(-100% - 5px), calc(-100% - 3px))",
+    // Tucked into the board's bottom-right corner (a hair left + down).
+    transform: "translate(calc(-100% - 12px), calc(-100% + 4px))",
     background: "none", border: "0", padding: "0", cursor: "pointer",
     // Styled like the muted "ROUND X" header: greyer chalk, a bit smaller.
     color: "rgba(244,241,232,0.55)",

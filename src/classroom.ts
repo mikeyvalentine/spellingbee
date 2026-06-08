@@ -841,7 +841,6 @@ function makeStatsBoard(): StatsBoard {
   const W = 512, H = 680;
   const surf = makeSurface(W, H);
   const ctx = surf.ctx;
-  const CHALK = "rgba(244,241,232,0.92)";
   const mesh = new THREE.Mesh(
     new THREE.PlaneGeometry(STATS_W, STATS_H),
     new THREE.MeshBasicMaterial({ map: surf.tex, transparent: true })
@@ -851,22 +850,22 @@ function makeStatsBoard(): StatsBoard {
   let state: { name: string; wpm: number; acc: number } | null = null;
   // Yellow "coloured-in with chalk" fill for the name pill (built once).
   const namePill = makeChalkPattern(ctx, "#ffd23b");
-  const line = (text: string, font: string, y: number, cx = W / 2): Line => ({
-    glyphs: layoutCentered(ctx, [{ text, color: CHALK, font }], cx, y),
+  // A "LABEL:  value" row, label muted + smaller, value bright + bigger.
+  const statRow = (label: string, value: string, y: number): Line => ({
+    glyphs: layoutCentered(ctx, [
+      { text: `${label}:  `, color: "rgba(244,241,232,0.66)", font: `600 40px ${FONT}` },
+      { text: value, color: "rgba(244,241,232,0.96)", font: `700 60px ${FONT}` },
+    ], W / 2, y),
   });
   const rebuild = () => {
     if (!state) return surf.setLines([]);
-    // Name on top in BLACK on a chalk-filled yellow pill; WPM (left) + ACCURACY
-    // (right) share one line below, smaller and high enough that the seated
-    // avatar doesn't cover them. WPM is sized for up to 3 digits.
-    const lx = W * 0.27, rx = W * 0.73;
+    // Name on top in BLACK on a chalk-filled yellow pill; WPM + ACC stacked on
+    // two rows below, high enough that the seated avatar doesn't cover them.
     const nameGlyphs = layoutCentered(ctx, [{ text: state.name, color: "#1b1b1b", font: `700 52px ${FONT}` }], W / 2, 80);
     surf.setLines([
       { glyphs: nameGlyphs, pill: namePill },
-      line(String(state.wpm), `700 76px ${FONT}`, 232, lx),
-      line("WPM", `600 26px ${FONT}`, 292, lx),
-      line(`${state.acc}%`, `700 76px ${FONT}`, 232, rx),
-      line("ACCURACY", `600 24px ${FONT}`, 292, rx),
+      statRow("WPM", String(state.wpm), 228),
+      statRow("ACC", `${state.acc}%`, 322),
     ]);
   };
 
