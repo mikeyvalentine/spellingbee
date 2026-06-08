@@ -2,8 +2,7 @@ import * as THREE from "three";
 import type { NetClient } from "./net";
 import type { AvatarManager } from "./avatars";
 import type { Classroom, CameraPose } from "./classroom";
-import { makeTomato } from "./tomato";
-import { makeChalk } from "./chalk";
+import { makeTomatoFlights } from "./tomato";
 
 interface BeeOpts {
   net: NetClient;
@@ -172,79 +171,17 @@ export function setupBee(opts: BeeOpts): BeeStage {
   boardCheck.addEventListener("click", () => submit());
   document.body.appendChild(boardCheck);
 
-  // ---- tomato power-up (3D) ----
-  // A tomato idles in the lower-right corner (camera-anchored) and spins on a
-  // tilted axis while you can throw. Click it to throw: the splat lands on the
-  // board for ~75% of the time left, covering all but the last 2 letters. On the
-  // server round-trip (bee_splat) EVERYONE sees a tomato arc toward the board.
-  const tomato = makeTomato(camera, scene);
+  // ---- power-up item menu (2D, bottom-right) ----
+  // The throw still launches a 3D tomato that everyone sees arc to the board.
+  const tomato = makeTomatoFlights(camera, scene);
+  const itemMenu = document.getElementById("item-menu")!;
+  const itemTomato = document.getElementById("item-tomato") as HTMLButtonElement;
+  const itemChalk = document.getElementById("item-chalk") as HTMLButtonElement;
 
-  // Hover tooltip ("Throw tomato"), following the cursor.
-  const tomatoTip = document.createElement("div");
-  tomatoTip.id = "tomato-tip";
-  tomatoTip.textContent = "Throw tomato";
-  Object.assign(tomatoTip.style, {
-    position: "fixed", zIndex: "17", display: "none", pointerEvents: "none",
-    padding: "5px 10px", borderRadius: "8px", transform: "translate(-50%, -135%)",
-    background: "rgba(12,15,22,0.9)", color: "#ffd9d2", border: "1px solid #5a2b26",
-    font: "600 12px system-ui, sans-serif", whiteSpace: "nowrap",
-    boxShadow: "0 4px 14px rgba(0,0,0,0.5)",
-  } as any);
-  document.body.appendChild(tomatoTip);
-
-  // ---- golden chalk power-up (3D), idling just LEFT of the tomato ----
-  const chalk = makeChalk(camera, scene);
-  const chalkTip = document.createElement("div");
-  chalkTip.id = "chalk-tip";
-  chalkTip.textContent = "Golden chalk: reveal a letter";
-  Object.assign(chalkTip.style, {
-    position: "fixed", zIndex: "17", display: "none", pointerEvents: "none",
-    padding: "5px 10px", borderRadius: "8px", transform: "translate(-50%, -135%)",
-    background: "rgba(12,15,22,0.9)", color: "#ffe9a8", border: "1px solid #6a531f",
-    font: "600 12px system-ui, sans-serif", whiteSpace: "nowrap",
-    boxShadow: "0 4px 14px rgba(0,0,0,0.5)",
-  } as any);
-  document.body.appendChild(chalkTip);
-
-  // ---- toolbar: a small rounded backing panel (camera-anchored) that the corner
-  // power-ups sit inside, so they read as a little tool tray in the lower-right. ----
-  const toolbar = (() => {
-    const c = document.createElement("canvas");
-    c.width = 320; c.height = 184;
-    const x = c.getContext("2d")!;
-    const pad = 6, r = 40, w = c.width, h = c.height;
-    const rr = () => {
-      x.beginPath();
-      x.moveTo(pad + r, pad);
-      x.arcTo(w - pad, pad, w - pad, h - pad, r);
-      x.arcTo(w - pad, h - pad, pad, h - pad, r);
-      x.arcTo(pad, h - pad, pad, pad, r);
-      x.arcTo(pad, pad, w - pad, pad, r);
-      x.closePath();
-    };
-    x.fillStyle = "rgba(14,17,24,0.5)"; rr(); x.fill();
-    x.lineWidth = 4; x.strokeStyle = "rgba(255,255,255,0.10)"; rr(); x.stroke();
-    const tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    const mesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.62, 0.36),
-      new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false })
-    );
-    mesh.renderOrder = 997; // behind the items (998)
-    mesh.matrixAutoUpdate = false;
-    mesh.visible = false;
-    scene.add(mesh);
-    return mesh;
-  })();
-  const TOOLBAR_POS = new THREE.Vector3(0.645, -0.52, -1.37); // just behind the items' plane
-  const toolbarMat = new THREE.Matrix4();
-  const toolbarQ = new THREE.Quaternion();
-  const toolbarScl = new THREE.Vector3(1, 1, 1);
-
-  // Each power-up is on-screen for any in-match participant who still has it, and
-  // shows the shared "cannot be used" disabled state when its own availability
-  // rule isn't met. Tomato: usable only on OTHER players' turns (you can't tomato
-  // your own word). Chalk: usable only on YOUR turn.
+  // Each item is in the menu only while the player still has it; it greys out +
+  // drops opacity (the `.disabled` class) when its availability rule isn't met.
+  // Tomato: usable only on OTHER players' turns (you can't tomato your own word).
+  // Chalk: usable only on YOUR turn.
   const tomatoVisible = () =>
     phase === "match" && !amSpectator && !matchOver && aliveIds.includes(localId) && !tomatoUsedThisTurn;
   const canThrow = () => tomatoVisible() && !amSpeller;
@@ -253,39 +190,32 @@ export function setupBee(opts: BeeOpts): BeeStage {
   const canChalk = () =>
     chalkVisible() && amSpeller && !answered && curLength > 0;
 
-  const hideTips = () => {
-    tomatoTip.style.display = "none";
-    chalkTip.style.display = "none";
-    if (!chalkAiming) document.body.style.cursor = "";
-  };
-
-  const updateTomatoBtn = () => {
-    // setActive before setVisible: on (re)appear the base snaps to the current
-    // active state (no active→disabled tween flash).
-    tomato.setActive(canThrow());
-    tomato.setVisible(tomatoVisible());
-    chalk.setActive(canChalk());
-    chalk.setVisible(chalkVisible());
-    if (!canChalk() && chalkAiming) cancelAim();
-    if (!tomatoVisible() && !chalkVisible()) hideTips();
-  };
-
   const ndcOf = (e: PointerEvent) =>
     [(e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1] as const;
+
+  const updateTomatoBtn = () => {
+    itemTomato.style.display = tomatoVisible() ? "" : "none";
+    itemTomato.classList.toggle("disabled", !canThrow());
+    itemTomato.title = canThrow() ? "Throw tomato" : "You can’t tomato your own word";
+    itemChalk.style.display = chalkVisible() ? "" : "none";
+    itemChalk.classList.toggle("disabled", !canChalk());
+    itemChalk.title = canChalk() ? "Golden chalk: reveal a letter" : "Golden chalk only on your turn";
+    itemMenu.classList.toggle("show", tomatoVisible() || chalkVisible());
+    if (!canChalk() && chalkAiming) cancelAim();
+  };
 
   const throwTomato = () => {
     if (!canThrow()) return;
     net.sendBee({ type: "bee_tomato" });
-    tomatoUsedThisTurn = true; // tomatoVisible() now false → the corner tomato hides as the flight starts
-    tomato.setVisible(false);
-    hideTips();
+    tomatoUsedThisTurn = true; // hides the tomato item; the flight starts on bee_splat
+    updateTomatoBtn();
   };
+  itemTomato.addEventListener("click", (e) => { e.stopPropagation(); if (canThrow()) throwTomato(); });
+  itemChalk.addEventListener("click", (e) => { e.stopPropagation(); if (canChalk()) startAim(); });
 
   // Chalk aim mode: arm on click, then pick a board slot to reveal.
   function startAim() {
     chalkAiming = true;
-    chalk.setHover(false);
-    chalkTip.style.display = "none";
     classroom.setBoardAim(-1);
     document.body.style.cursor = "crosshair";
   }
@@ -295,58 +225,24 @@ export function setupBee(opts: BeeOpts): BeeStage {
     document.body.style.cursor = "";
   }
 
-  const showTip = (tip: HTMLElement, e: PointerEvent) => {
-    tip.style.display = "block";
-    tip.style.left = `${e.clientX}px`;
-    tip.style.top = `${e.clientY}px`;
-  };
+  // Aim mode: hover the board's letter slots, click one to reveal. (The item menu
+  // itself is plain DOM — native :hover handles its scale/glow.)
   window.addEventListener("pointermove", (e) => {
+    if (!chalkAiming) return;
     const [x, y] = ndcOf(e);
-    // Aim mode: track which letter slot is under the cursor.
-    if (chalkAiming) {
-      const idx = classroom.boardSlotAt(x, y, camera);
-      classroom.setBoardAim(idx);
-      document.body.style.cursor = idx >= 0 ? "pointer" : "crosshair";
-      return;
-    }
-    // Both power-ups are on-screen during a match (each greys to its disabled
-    // state when unavailable), so check both. They never overlap.
-    let cursor = "";
-    if (tomatoVisible()) {
-      const over = tomato.hitTest(x, y);
-      const active = canThrow();
-      tomato.setHover(over && active);
-      if (over) {
-        tomatoTip.textContent = active ? "Throw tomato" : "You can’t tomato your own word";
-        showTip(tomatoTip, e);
-        cursor = active ? "pointer" : "not-allowed";
-      } else tomatoTip.style.display = "none";
-    } else tomatoTip.style.display = "none";
-
-    if (chalkVisible()) {
-      const over = chalk.hitTest(x, y);
-      const active = canChalk();
-      chalk.setHover(over && active); // disabled chalk shows no scale/glow
-      if (over) {
-        chalkTip.textContent = active ? "Golden chalk: reveal a letter" : "Golden chalk only available during your turn";
-        showTip(chalkTip, e);
-        cursor = active ? "pointer" : "not-allowed";
-      } else chalkTip.style.display = "none";
-    } else chalkTip.style.display = "none";
-
-    document.body.style.cursor = cursor;
+    const idx = classroom.boardSlotAt(x, y, camera);
+    classroom.setBoardAim(idx);
+    document.body.style.cursor = idx >= 0 ? "pointer" : "crosshair";
   });
   window.addEventListener("pointerdown", (e) => {
+    if (!chalkAiming) return;
+    const t = e.target as HTMLElement;
+    if (t.closest && t.closest("#item-menu")) return; // clicking the menu isn't an aim pick
     const [x, y] = ndcOf(e);
-    if (chalkAiming) {
-      const idx = classroom.boardSlotAt(x, y, camera);
-      if (idx >= 0) net.sendBee({ type: "bee_chalk", index: idx }); // reveal confirmed on bee_reveal
-      cancelAim(); // a click on empty space cancels without spending it
-      e.stopPropagation();
-      return;
-    }
-    if (canThrow() && tomato.hitTest(x, y)) { e.stopPropagation(); throwTomato(); return; }
-    if (canChalk() && chalk.hitTest(x, y)) { e.stopPropagation(); startAim(); return; }
+    const idx = classroom.boardSlotAt(x, y, camera);
+    if (idx >= 0) net.sendBee({ type: "bee_chalk", index: idx }); // reveal confirmed on bee_reveal
+    cancelAim(); // a click on empty space cancels without spending it
+    e.stopPropagation();
   });
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && chalkAiming) { cancelAim(); e.preventDefault(); }
@@ -696,7 +592,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
         (classroom.boardMesh as THREE.Object3D).getWorldPosition(target);
         let from: THREE.Vector3 | null = null;
         if (m.by && m.by === localId) {
-          from = tomato.cornerWorldPos(new THREE.Vector3());
+          from = tomato.menuWorldPos(new THREE.Vector3());
         } else if (m.by) {
           const av = avatars.get(m.by);
           if (av) { from = new THREE.Vector3(); av.getWorldPosition(from); from.y += 1.4; }
@@ -909,16 +805,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
     update: (dt: number) => {
       applyCamera(phase === "match" ? classroom.matchCam : classroom.lobbyCam);
       applyCameraLife(dt); // breathing bob (match) + cursor parallax (both)
-      // Toolbar tray behind the items (shown whenever a power-up is on-screen).
-      toolbar.visible = tomatoVisible() || chalkVisible();
-      if (toolbar.visible) {
-        camera.updateMatrixWorld();
-        toolbarMat.compose(TOOLBAR_POS, toolbarQ, toolbarScl);
-        toolbar.matrix.multiplyMatrices(camera.matrixWorld, toolbarMat);
-        toolbar.matrixWorldNeedsUpdate = true;
-      }
-      tomato.update(dt); // anchor + spin the corner tomato; advance any flights
-      chalk.update(dt); // anchor + spin the corner golden chalk
+      tomato.update(dt); // advance any in-flight thrown tomatoes
 
       // Seats + speller are placed once by seatPlayers() on each state change; only
       // re-apply them every frame in mock/dev so the debug sliders stay live.

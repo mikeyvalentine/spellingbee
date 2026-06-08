@@ -1,42 +1,30 @@
 import * as THREE from "three";
-import { makePowerup } from "./powerup";
 
-// 3D tomato power-up. An idle tomato sits in the lower-right corner of the view
-// (anchored to the camera) via the shared power-up base, which also handles the
-// hover/disabled states. Throwing launches a tomato that arcs toward the
-// chalkboard; when it lands the caller swaps in the splat. Placeholder geometry
-// — swap buildTomato() for a loaded .glb later (keep the same ~1-unit size).
+// Tomato throw effect. The idle item UI is now a 2D DOM menu (see index.html /
+// bee.ts); this module only owns the in-flight 3D tomato that arcs from the menu
+// (or the thrower's avatar) toward the chalkboard so everyone sees the throw
+// before the splat lands.
 
-export interface TomatoView {
-  group: THREE.Group;
-  setVisible(v: boolean): void;
-  setActive(v: boolean): void; // active = usable (not your turn); else disabled
-  setHover(v: boolean): void;
-  update(dt: number): void; // anchor + spin + state; advance flights
-  hitTest(ndcX: number, ndcY: number): boolean;
-  cornerWorldPos(out: THREE.Vector3): THREE.Vector3;
-  /** Launch a tomato arcing from -> to (world space); onLand fires at the end. */
+export interface TomatoFlights {
+  update(dt: number): void; // advance any in-flight tomatoes
   launch(from: THREE.Vector3, to: THREE.Vector3, onLand: () => void): void;
+  menuWorldPos(out: THREE.Vector3): THREE.Vector3; // world point near the lower-right item menu
 }
 
-// Row of corner items, bottom-right. Tomato is the right-most.
-const IDLE = { pos: new THREE.Vector3(0.74, -0.52, -1.35), scale: 0.21 };
-const SPIN_AXIS = new THREE.Vector3(0.32, 1, 0.06).normalize();
-const SPIN_SPEED = 0.18; // rad/s (slow)
 const FLIGHT_MS = 413; // throw speed
-const HOVER_SCALE = 0.14;
-const HOVER_GLOW = 0.34; // peak emissive on hover
+const FLY_SCALE = 0.21;
+const SPIN_AXIS = new THREE.Vector3(0.32, 1, 0.06).normalize();
+// Camera-space anchor roughly over the lower-right item menu (flight source).
+const MENU_LOCAL = new THREE.Vector3(0.52, -0.42, -1.2);
 
 function buildTomato(): THREE.Group {
   const g = new THREE.Group();
   const body = new THREE.Mesh(
-    new THREE.SphereGeometry(0.5, 28, 20),
-    new THREE.MeshStandardMaterial({ color: 0xd62b1f, roughness: 0.42, metalness: 0.0, emissive: 0xd62b1f, emissiveIntensity: 0 })
+    new THREE.SphereGeometry(0.5, 24, 18),
+    new THREE.MeshStandardMaterial({ color: 0xd62b1f, roughness: 0.42, metalness: 0.0 })
   );
-  body.scale.set(1, 0.86, 1); // slightly squashed, tomato-ish
-  body.name = "tomatoBody";
+  body.scale.set(1, 0.86, 1);
   g.add(body);
-  // Calyx (green star) + little stem on top.
   const green = new THREE.MeshStandardMaterial({ color: 0x4f8f37, roughness: 0.7 });
   const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.05, 0.16, 8), green);
   stem.position.set(0, 0.5, 0);
@@ -49,19 +37,10 @@ function buildTomato(): THREE.Group {
     leaf.scale.set(1, 1, 0.45);
     g.add(leaf);
   }
-  // Soft highlight so the spin is visible.
-  const hl = new THREE.Mesh(
-    new THREE.SphereGeometry(0.13, 12, 10),
-    new THREE.MeshBasicMaterial({ color: 0xff9c8e, transparent: true, opacity: 0.45 })
-  );
-  hl.position.set(-0.17, 0.17, 0.37);
-  g.add(hl);
   g.renderOrder = 998;
   g.traverse((o) => { (o as THREE.Mesh).renderOrder = 998; });
   return g;
 }
-
-const RED = new THREE.Color(0xd62b1f), DISABLED = new THREE.Color(0x5a5a5e); // grey when "not your turn"
 
 interface Flight {
   mesh: THREE.Group;
@@ -74,25 +53,10 @@ interface Flight {
 
 const easeIn = (p: number) => p * p;
 
-export function makeTomato(camera: THREE.PerspectiveCamera, scene: THREE.Scene): TomatoView {
-  const spinner = buildTomato();
-  const bodyMat = (spinner.getObjectByName("tomatoBody") as THREE.Mesh).material as THREE.MeshStandardMaterial;
-
-  const pu = makePowerup({
-    camera, scene, spinner,
-    idlePos: IDLE.pos, scale: IDLE.scale, spinSpeed: SPIN_SPEED,
-    applySpin: (s, a) => s.quaternion.setFromAxisAngle(SPIN_AXIS, a),
-    hoverScale: HOVER_SCALE,
-    applyState: (active, hover) => {
-      bodyMat.color.copy(DISABLED).lerp(RED, active); // grey when disabled, red when usable
-      bodyMat.emissive.copy(RED);
-      bodyMat.emissiveIntensity = HOVER_GLOW * hover;
-    },
-  });
-
+export function makeTomatoFlights(camera: THREE.PerspectiveCamera, scene: THREE.Scene): TomatoFlights {
   const flights: Flight[] = [];
+
   const update = (dt: number) => {
-    pu.update(dt);
     for (let i = flights.length - 1; i >= 0; i--) {
       const f = flights[i];
       f.t += (dt * 1000) / FLIGHT_MS;
@@ -100,7 +64,7 @@ export function makeTomato(camera: THREE.PerspectiveCamera, scene: THREE.Scene):
       f.mesh.position.lerpVectors(f.from, f.to, easeIn(p));
       f.mesh.position.y += Math.sin(p * Math.PI) * f.arc; // parabolic lift
       f.mesh.rotateOnAxis(SPIN_AXIS, dt * 9); // fast tumble in flight
-      f.mesh.scale.setScalar(IDLE.scale * (1 - 0.45 * p)); // shrink slightly as it lands
+      f.mesh.scale.setScalar(FLY_SCALE * (1 - 0.45 * p)); // shrink slightly as it lands
       if (p >= 1) {
         scene.remove(f.mesh);
         flights.splice(i, 1);
@@ -110,19 +74,17 @@ export function makeTomato(camera: THREE.PerspectiveCamera, scene: THREE.Scene):
   };
 
   return {
-    group: pu.group,
-    setVisible: pu.setVisible,
-    setActive: pu.setActive,
-    setHover: pu.setHover,
     update,
-    hitTest: pu.hitTest,
-    cornerWorldPos: pu.cornerWorldPos,
     launch: (from, to, onLand) => {
       const mesh = buildTomato();
       mesh.position.copy(from);
-      mesh.scale.setScalar(IDLE.scale);
+      mesh.scale.setScalar(FLY_SCALE);
       scene.add(mesh);
       flights.push({ mesh, from: from.clone(), to: to.clone(), arc: from.distanceTo(to) * 0.17, t: 0, onLand });
+    },
+    menuWorldPos: (out) => {
+      camera.updateMatrixWorld();
+      return out.copy(MENU_LOCAL).applyMatrix4(camera.matrixWorld);
     },
   };
 }
