@@ -26,36 +26,19 @@ const HOVER_SCALE = 0.14;
 const BASE_GLOW = 0.7; // resting emissive glow (active chalk) — clearly self-lit
 const HOVER_GLOW = 0.6; // extra emissive on hover
 
-const GOLD = 0xfff2bf, GOLD_TIP = 0xfffdf0; // warm yellow-white
-const GREY = 0x8d8d93, GREY_TIP = 0xc7c7cc; // "not your turn" disabled look
+const GOLD = 0xfff2bf; // white-yellow when available
+const GREY = 0x44444a; // dark grey when "not your turn"
 
 function buildChalk(): THREE.Group {
   const g = new THREE.Group();
-  // A rough chalk stick: an UPRIGHT hexagonal prism centered at the origin, so it
-  // spins cleanly about its own long (Y) axis. Low-poly + nicks read as chalk.
+  // A plain low-poly cylinder, one material, centered at the origin so it spins
+  // cleanly about its own long (Y) axis.
   const mat = new THREE.MeshStandardMaterial({
-    color: GOLD, roughness: 0.62, metalness: 0.25, emissive: GOLD, emissiveIntensity: 0,
-    flatShading: true,
+    color: GOLD, roughness: 0.55, metalness: 0.1, emissive: GOLD, emissiveIntensity: 0,
   });
-  const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.2, 1.0, 6, 1), mat);
+  const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 1.0, 10, 1), mat);
   stick.name = "chalkBody";
   g.add(stick);
-  // A worn, lighter tip on the top end.
-  const tip = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.1, 0.18, 0.16, 6, 1),
-    new THREE.MeshStandardMaterial({ color: GOLD_TIP, roughness: 0.5, metalness: 0.1, flatShading: true })
-  );
-  tip.name = "chalkTip";
-  tip.position.set(0, 0.5, 0);
-  g.add(tip);
-  // A few nicks OFF the long axis + up the shaft, so the in-place spin reads clearly.
-  for (let i = 0; i < 3; i++) {
-    const nick = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.09), mat);
-    const a = (i / 3) * Math.PI * 2;
-    nick.position.set(Math.cos(a) * 0.18, (i - 1) * 0.24, Math.sin(a) * 0.18);
-    nick.rotation.set(0.4, a, 0.2);
-    g.add(nick);
-  }
   g.renderOrder = 998;
   g.traverse((o) => { (o as THREE.Mesh).renderOrder = 998; });
   return g;
@@ -68,10 +51,9 @@ export function makeChalk(camera: THREE.PerspectiveCamera, scene: THREE.Scene): 
   group.add(spinner);
   scene.add(group);
   const bodyMat = (spinner.getObjectByName("chalkBody") as THREE.Mesh).material as THREE.MeshStandardMaterial;
-  const tipMat = (spinner.getObjectByName("chalkTip") as THREE.Mesh).material as THREE.MeshStandardMaterial;
 
   let visible = false;
-  let active = true; // gold + interactive; false = greyed "not your turn"
+  let active = true; // white-yellow + interactive; false = dark grey "not your turn"
   let spin = 0;
   let hover = false;
   let hoverAmt = 0;
@@ -79,9 +61,6 @@ export function makeChalk(camera: THREE.PerspectiveCamera, scene: THREE.Scene): 
   const applyTint = () => {
     bodyMat.color.setHex(active ? GOLD : GREY);
     bodyMat.emissive.setHex(active ? GOLD : 0x000000);
-    tipMat.color.setHex(active ? GOLD_TIP : GREY_TIP);
-    tipMat.emissive.setHex(active ? GOLD_TIP : 0x000000);
-    tipMat.emissiveIntensity = active ? 0.5 : 0; // the tip glows too
   };
 
   const local = new THREE.Matrix4();

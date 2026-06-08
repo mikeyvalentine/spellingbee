@@ -18,7 +18,7 @@ const cache = new Map(); // word -> { wav, ms, wavWord }
 
 const LANG = "en-US";
 let RATE = Number(ENV.GOOGLE_TTS_RATE || 0.9); // a touch slow for clarity
-let currentVoice = ENV.GOOGLE_TTS_VOICE || "en-US-Neural2-F";
+let currentVoice = ENV.GOOGLE_TTS_VOICE || "en-US-Neural2-J";
 let apiKey = ENV.GOOGLE_TTS_API_KEY || "";
 
 // Set credentials/voice/rate at runtime (used by the Cloudflare Worker, which
