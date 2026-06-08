@@ -90,6 +90,8 @@ export interface Classroom {
   setBoardAim(index: number): void;
   /** Hit-test a pointer (NDC) against the board's letter slots; returns index or -1. */
   boardSlotAt(ndcX: number, ndcY: number, camera: THREE.Camera): number;
+  /** Enable the blinking awaiting-"_" cursor (only on the local speller's POV). */
+  setBoardCursorEnabled(on: boolean): void;
 }
 
 const norm = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -137,6 +139,7 @@ export async function loadClassroom(scene: THREE.Scene): Promise<Classroom> {
     setEndScreen: board.setEnd,
     revealLetter: board.revealLetter,
     clearReveals: board.clearReveals,
+    setBoardCursorEnabled: board.setCursorEnabled,
     setBoardAim: board.setAim,
     boardSlotAt: (ndcX, ndcY, cam) => {
       boardRay.setFromCamera(boardNdc.set(ndcX, ndcY), cam);
@@ -702,6 +705,7 @@ interface Chalkboard {
   clearReveals(): void;
   setAim(index: number): void; // -1 clears the aim oval
   slotAtUV(u: number, v: number): number; // board UV -> letter-slot index (-1 = none)
+  setCursorEnabled(on: boolean): void; // blink the awaiting "_" (local speller only)
 }
 
 function makeChalkboard(): Chalkboard {
@@ -728,7 +732,9 @@ function makeChalkboard(): Chalkboard {
   let aimIndex = -1; // slot currently highlighted by the chalk aim oval (-1 = none)
   let revealRaf = 0;
   // Blinking text cursor on the slot awaiting input (leftmost empty, NON-gold slot).
+  // Only enabled on the local speller's own POV (other clients see static cells).
   const BLINK_MS = 450; // medium blink
+  let cursorEnabled = false;
   let cursorIdx = -1;
   let cursorOn = true;
   let blinkTimer = 0;
@@ -854,8 +860,11 @@ function makeChalkboard(): Chalkboard {
       ctx.font = font;
       const now = performance.now();
       // The cursor is the leftmost empty, non-gold slot (= the next type target).
-      for (let i = 0; i < n; i++) {
-        if (!reveals.has(i) && (cells[i] ?? "_") === "_") { cursorIdx = i; break; }
+      // Only the local speller sees it blink; other clients render static cells.
+      if (cursorEnabled) {
+        for (let i = 0; i < n; i++) {
+          if (!reveals.has(i) && (cells[i] ?? "_") === "_") { cursorIdx = i; break; }
+        }
       }
       const glyphs: Glyph[] = [];
       for (let i = 0; i < n; i++) {
@@ -1003,6 +1012,11 @@ function makeChalkboard(): Chalkboard {
     aimIndex = index;
     surf.redraw();
   };
+  const setCursorEnabled = (on: boolean) => {
+    if (cursorEnabled === on) return;
+    cursorEnabled = on;
+    rebuild(); // recompute cursorIdx + (re)start/stop the blink
+  };
 
   // Throw a tomato: splat covers all but the last 2 letters, growing in, holding,
   // then sliding down + fading over `durationMs`.
@@ -1061,7 +1075,7 @@ function makeChalkboard(): Chalkboard {
     mesh, setGuess, setResult, clear, setHeader,
     writeIn: surf.writeIn, eraseOut: surf.eraseOut,
     splatTomato, clearSplat, setEnd,
-    revealLetter, clearReveals, setAim, slotAtUV,
+    revealLetter, clearReveals, setAim, slotAtUV, setCursorEnabled,
   };
 }
 

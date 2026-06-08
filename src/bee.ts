@@ -233,12 +233,25 @@ export function setupBee(opts: BeeOpts): BeeStage {
   itemTomato.addEventListener("click", (e) => { e.stopPropagation(); if (canThrow()) throwTomato(); });
   itemChalk.addEventListener("click", (e) => { e.stopPropagation(); if (canChalk()) startAim(); });
 
+  const firstEmptySlot = () => {
+    for (let i = 0; i < curLength; i++) if (!gold[i] && !slots[i]) return i;
+    return -1;
+  };
+
   // Chalk aim mode: arm on click, then pick a board slot to reveal.
   function startAim() {
     chalkAiming = true;
-    armedAim = -1;
-    classroom.setBoardAim(-1);
     document.body.style.cursor = "crosshair";
+    // Touch: pre-arm the next awaiting slot so tapping the chalk gives instant
+    // feedback (an oval) and revealing the next letter is a single tap. Desktop
+    // uses hover instead, so leave the oval off until the cursor moves.
+    if (isTouch) {
+      armedAim = firstEmptySlot();
+      classroom.setBoardAim(armedAim);
+    } else {
+      armedAim = -1;
+      classroom.setBoardAim(-1);
+    }
   }
   function cancelAim() {
     chalkAiming = false;
@@ -560,6 +573,8 @@ export function setupBee(opts: BeeOpts): BeeStage {
   // third, alphabet + replay + submit. Uses the chalk font on the keys.
   const kbd = document.getElementById("kbd")!;
   const kbdTimerbar = document.getElementById("kbd-timerbar")!;
+  const kbdReplay = document.getElementById("kbd-replay")!;
+  const kbdSubmit = document.getElementById("kbd-submit")!;
   const kbType = (ch: string) => {
     if (phase !== "match" || !amSpeller || answered) return;
     if (addLetter(ch)) { playClick(); renderGuess(); }
@@ -574,19 +589,22 @@ export function setupBee(opts: BeeOpts): BeeStage {
   ["qwertyuiop", "asdfghjkl", "zxcvbnm"].forEach((row, ri) => {
     const r = document.createElement("div");
     r.className = "kbd-row";
-    for (const ch of row) r.appendChild(mkKey(ch.toUpperCase(), "", () => kbType(ch)));
+    for (const ch of row) {
+      const key = mkKey(ch.toUpperCase(), "", () => kbType(ch));
+      key.dataset.k = ch.toUpperCase(); // drives the iOS-style key-pop preview
+      r.appendChild(key);
+    }
     if (ri === 2) r.appendChild(mkKey("⌫", "act", () => { if (amSpeller && !answered && delLetter()) renderGuess(); }));
     kbd.appendChild(r);
   });
-  {
-    const r = document.createElement("div");
-    r.className = "kbd-row";
-    r.appendChild(mkKey("↺", "act replay wide", () => { if (lastBuffer) playBuffer(lastBuffer); }));
-    r.appendChild(mkKey("✓", "act submit wide", () => submit()));
-    kbd.appendChild(r);
-  }
+  // Replay (round, left) + submit (round, right) FABs above the keyboard.
+  kbdReplay.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); if (lastBuffer) playBuffer(lastBuffer); });
+  kbdSubmit.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); submit(); });
   const updateKeyboard = () => {
-    kbd.classList.toggle("show", isTouch && phase === "match" && amSpeller && !answered && !amSpectator);
+    const show = isTouch && phase === "match" && amSpeller && !answered && !amSpectator;
+    kbd.classList.toggle("show", show);
+    kbdReplay.classList.toggle("show", show);
+    kbdSubmit.classList.toggle("show", show);
   };
 
   // The old slim match bar is retired on touch (the keyboard replaces it); the
@@ -697,6 +715,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
         // The tier is known now, so show the round header straight away.
         classroom.setBoardHeader(`ROUND ${curRound}`, { text: curTier, color: curTierColor });
         classroom.clearBoard(curLength);
+        classroom.setBoardCursorEnabled(amSpeller); // only the speller's own POV blinks the cursor
         classroom.revealBoards();
 
         whoEl.textContent = amSpeller
@@ -821,8 +840,10 @@ export function setupBee(opts: BeeOpts): BeeStage {
   let targetMx = 0, targetMy = 0; // cursor in NDC [-1,1]
   let curMx = 0, curMy = 0; // eased toward the target
   let bobT = 0;
+  let turnTilt = 0; // 0..1 eased; on the local speller's touch turn, tilt down for the keyboard
   const MAX_YAW = 0.045, MAX_PITCH = 0.03; // cursor-look amounts (radians)
   const BOB_Y = 0.014, BOB_X = 0.008; // breathing translation (world units)
+  const TURN_TILT = 0.16; // downward pitch on the speller's touch turn (radians)
   window.addEventListener("pointermove", (e) => {
     targetMx = (e.clientX / window.innerWidth) * 2 - 1;
     targetMy = (e.clientY / window.innerHeight) * 2 - 1;
@@ -835,6 +856,11 @@ export function setupBee(opts: BeeOpts): BeeStage {
       camera.translateY(Math.sin(bobT * 1.1) * BOB_Y);
       camera.translateX(Math.sin(bobT * 0.73) * BOB_X);
     }
+    // On the local speller's turn (touch), ease the view DOWN so the word rises
+    // above the on-screen keyboard. (Looking down lifts the wall board in frame.)
+    const tiltTarget = isTouch && phase === "match" && amSpeller && !answered && !amSpectator ? 1 : 0;
+    turnTilt += (tiltTarget - turnTilt) * Math.min(1, dt * 6);
+    if (turnTilt > 0.001) camera.rotateX(-turnTilt * TURN_TILT);
     // Cursor parallax (both cams): look slightly toward the cursor — right of the
     // page pans the view right, etc. Eased so it glides rather than snaps.
     curMx += (targetMx - curMx) * Math.min(1, dt * 5);
