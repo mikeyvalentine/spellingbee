@@ -7,14 +7,27 @@
 //   wavWord — base64 MP3 of just the word "X." (banked for the Replay button)
 //   ms      — unused (kept for compatibility)
 //
-// Requires GOOGLE_TTS_API_KEY in .env, with the Cloud Text-to-Speech API enabled.
-import "dotenv/config";
+// Requires a Google TTS API key with the Cloud Text-to-Speech API enabled.
+// Node reads it from process.env (loaded via dotenv in server/index.js); the
+// Cloudflare Worker has no process.env, so it calls configureTts() with its
+// bindings instead. We read whatever process.env exists at load, then let
+// configureTts() override.
+const ENV = (typeof process !== "undefined" && process.env) || {};
 
 const cache = new Map(); // word -> { wav, ms, wavWord }
 
 const LANG = "en-US";
-const RATE = Number(process.env.GOOGLE_TTS_RATE || 0.9); // a touch slow for clarity
-let currentVoice = process.env.GOOGLE_TTS_VOICE || "en-US-Neural2-F";
+let RATE = Number(ENV.GOOGLE_TTS_RATE || 0.9); // a touch slow for clarity
+let currentVoice = ENV.GOOGLE_TTS_VOICE || "en-US-Neural2-F";
+let apiKey = ENV.GOOGLE_TTS_API_KEY || "";
+
+// Set credentials/voice/rate at runtime (used by the Cloudflare Worker, which
+// passes its env bindings). Safe to call multiple times.
+export const configureTts = ({ apiKey: k, voice, rate } = {}) => {
+  if (k) apiKey = k;
+  if (voice) currentVoice = voice;
+  if (rate != null && rate !== "") RATE = Number(rate);
+};
 
 export const getVoice = () => currentVoice;
 // Switch the active voice at runtime (used by the debug voice picker). Clears the
@@ -27,11 +40,10 @@ export const setVoice = (v) => {
 };
 
 async function gtts(text, voice = currentVoice) {
-  const key = process.env.GOOGLE_TTS_API_KEY;
-  if (!key) throw new Error("GOOGLE_TTS_API_KEY is not set");
+  if (!apiKey) throw new Error("GOOGLE_TTS_API_KEY is not set");
   const lang = voice.split("-").slice(0, 2).join("-") || LANG; // e.g. en-GB-Neural2-A -> en-GB
   const res = await fetch(
-    `https://texttospeech.googleapis.com/v1/text:synthesize?key=${encodeURIComponent(key)}`,
+    `https://texttospeech.googleapis.com/v1/text:synthesize?key=${encodeURIComponent(apiKey)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },

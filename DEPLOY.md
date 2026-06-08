@@ -8,7 +8,53 @@ Node server instead.
 
 ---
 
-## Primary: Railway (stable URL, no laptop)
+## Primary: Cloudflare Workers + Durable Objects (free, always-on)
+
+The Worker (`worker/index.js`) serves the built client + the `/api` routes; a
+Durable Object (`BeeRoom`, `worker/room.js`) holds the WebSocket connections and
+runs the game (`server/bee.js`, unchanged). Free tier covers a small game — no
+laptop, permanent URL.
+
+### One-time setup
+1. Log in (opens a browser to your Cloudflare account):
+   ```
+   npx wrangler login
+   ```
+2. Set the two secrets (prompted for each value):
+   ```
+   npx wrangler secret put DISCORD_CLIENT_SECRET
+   npx wrangler secret put GOOGLE_TTS_API_KEY
+   ```
+   Non-secret config (`DISCORD_CLIENT_ID`, `GOOGLE_TTS_VOICE`, `GOOGLE_TTS_RATE`)
+   lives in `wrangler.toml` `[vars]` — edit there if it changes.
+3. Deploy (builds the client, then uploads Worker + assets + the Durable Object):
+   ```
+   npm run cf:deploy
+   ```
+   Wrangler prints your URL: `https://spelling-bee.<your-subdomain>.workers.dev`.
+4. Discord Dev Portal → **Activities → URL Mappings** → set `/` to that host
+   (no `https://`). Permanent.
+
+> The client is built with `VITE_DISCORD_CLIENT_ID` from your local `.env` at
+> `cf:deploy` time, so keep `.env` present when you deploy. Custom domain later:
+> Cloudflare dashboard → Workers → your worker → **Triggers → Custom Domains**.
+
+### Local dev against the real Worker runtime
+```
+npm run build      # produce dist/ for the ASSETS binding
+npm run cf:dev     # http://127.0.0.1:8787 (miniflare simulates the DO + assets)
+```
+Local secrets live in `.dev.vars` (gitignored). The lighter Node loop
+(`npm run server` + `npm run dev`) still works for quick iteration.
+
+### Redeploy
+Just `npm run cf:deploy` again (or wire the GitHub repo to Cloudflare for
+push-to-deploy, setting the same vars/secrets + `VITE_DISCORD_CLIENT_ID` as a
+build variable in the dashboard).
+
+---
+
+## Alternative: Railway (~$5/mo, no rewrite)
 
 Railway runs the Node server 24/7 with a permanent HTTPS URL — no tunnel, no
 laptop dependency.
