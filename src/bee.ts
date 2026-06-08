@@ -207,10 +207,13 @@ export function setupBee(opts: BeeOpts): BeeStage {
   } as any);
   document.body.appendChild(chalkTip);
 
-  const canThrow = () =>
-    phase === "match" && !amSpeller && !amSpectator && aliveIds.includes(localId) && !tomatoUsedThisTurn;
-  // The chalk is on-screen for any in-match participant who still has it; it's only
-  // ACTIVE (gold + usable) on their own turn — greyed out ("not your turn") otherwise.
+  // Each power-up is on-screen for any in-match participant who still has it, and
+  // shows the shared "cannot be used" disabled state when its own availability
+  // rule isn't met. Tomato: usable only on OTHER players' turns (you can't tomato
+  // your own word). Chalk: usable only on YOUR turn.
+  const tomatoVisible = () =>
+    phase === "match" && !amSpectator && !matchOver && aliveIds.includes(localId) && !tomatoUsedThisTurn;
+  const canThrow = () => tomatoVisible() && !amSpeller;
   const chalkVisible = () =>
     phase === "match" && !amSpectator && !matchOver && aliveIds.includes(localId) && !chalkUsedThisMatch;
   const canChalk = () =>
@@ -223,11 +226,14 @@ export function setupBee(opts: BeeOpts): BeeStage {
   };
 
   const updateTomatoBtn = () => {
-    tomato.setVisible(canThrow());
-    chalk.setVisible(chalkVisible());
+    // setActive before setVisible: on (re)appear the base snaps to the current
+    // active state (no active→disabled tween flash).
+    tomato.setActive(canThrow());
+    tomato.setVisible(tomatoVisible());
     chalk.setActive(canChalk());
+    chalk.setVisible(chalkVisible());
     if (!canChalk() && chalkAiming) cancelAim();
-    if (!canThrow() && !chalkVisible()) hideTips();
+    if (!tomatoVisible() && !chalkVisible()) hideTips();
   };
 
   const ndcOf = (e: PointerEvent) =>
@@ -236,8 +242,8 @@ export function setupBee(opts: BeeOpts): BeeStage {
   const throwTomato = () => {
     if (!canThrow()) return;
     net.sendBee({ type: "bee_tomato" });
-    tomatoUsedThisTurn = true;
-    tomato.setVisible(false); // the corner tomato vanishes; the flight starts on bee_splat
+    tomatoUsedThisTurn = true; // tomatoVisible() now false → the corner tomato hides as the flight starts
+    tomato.setVisible(false);
     hideTips();
   };
 
@@ -269,19 +275,24 @@ export function setupBee(opts: BeeOpts): BeeStage {
       document.body.style.cursor = idx >= 0 ? "pointer" : "crosshair";
       return;
     }
-    // Tomato + chalk can be on-screen at once (the chalk greys out off-turn), so
-    // check both. They never overlap, so the last hovered one wins the cursor.
+    // Both power-ups are on-screen during a match (each greys to its disabled
+    // state when unavailable), so check both. They never overlap.
     let cursor = "";
-    if (canThrow()) {
+    if (tomatoVisible()) {
       const over = tomato.hitTest(x, y);
-      tomato.setHover(over);
-      if (over) { showTip(tomatoTip, e); cursor = "pointer"; } else tomatoTip.style.display = "none";
+      const active = canThrow();
+      tomato.setHover(over && active);
+      if (over) {
+        tomatoTip.textContent = active ? "Throw tomato" : "You can’t tomato your own word";
+        showTip(tomatoTip, e);
+        cursor = active ? "pointer" : "not-allowed";
+      } else tomatoTip.style.display = "none";
     } else tomatoTip.style.display = "none";
 
     if (chalkVisible()) {
       const over = chalk.hitTest(x, y);
       const active = canChalk();
-      chalk.setHover(over && active); // greyed chalk shows no scale/glow
+      chalk.setHover(over && active); // disabled chalk shows no scale/glow
       if (over) {
         chalkTip.textContent = active ? "Golden chalk: reveal a letter" : "Golden chalk only available during your turn";
         showTip(chalkTip, e);

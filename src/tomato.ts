@@ -1,35 +1,35 @@
 import * as THREE from "three";
+import { makePowerup } from "./powerup";
 
 // 3D tomato power-up. An idle tomato sits in the lower-right corner of the view
-// (anchored to the camera) and spins slowly on a tilted axis to read as an
-// active item. Throwing launches a tomato that arcs toward the chalkboard; when
-// it lands the caller swaps in the splat. Placeholder geometry — swap
-// buildTomato() for a loaded .glb later (keep the same ~1-unit size).
+// (anchored to the camera) via the shared power-up base, which also handles the
+// hover/disabled states. Throwing launches a tomato that arcs toward the
+// chalkboard; when it lands the caller swaps in the splat. Placeholder geometry
+// — swap buildTomato() for a loaded .glb later (keep the same ~1-unit size).
 
 export interface TomatoView {
-  group: THREE.Group; // idle corner tomato (add to scene)
+  group: THREE.Group;
   setVisible(v: boolean): void;
-  setHover(v: boolean): void; // hover = subtle scale-up + glow
-  update(dt: number): void; // anchor + spin idle; advance flights
-  hitTest(ndcX: number, ndcY: number): boolean; // pointer over the idle tomato
-  cornerWorldPos(out: THREE.Vector3): THREE.Vector3; // idle tomato's world position
+  setActive(v: boolean): void; // active = usable (not your turn); else disabled
+  setHover(v: boolean): void;
+  update(dt: number): void; // anchor + spin + state; advance flights
+  hitTest(ndcX: number, ndcY: number): boolean;
+  cornerWorldPos(out: THREE.Vector3): THREE.Vector3;
   /** Launch a tomato arcing from -> to (world space); onLand fires at the end. */
   launch(from: THREE.Vector3, to: THREE.Vector3, onLand: () => void): void;
 }
 
-// Idle pose in camera space (-Z forward). Lower-right corner, near the edge.
 const IDLE = { pos: new THREE.Vector3(0.74, -0.46, -1.35), scale: 0.32 };
 const SPIN_AXIS = new THREE.Vector3(0.32, 1, 0.06).normalize();
 const SPIN_SPEED = 0.9; // rad/s
-const FLIGHT_MS = 413; // throw speed (was 620 — 1.5x faster)
-const HOVER_SCALE = 0.14; // extra scale on hover
-const HOVER_GLOW = 0.34; // peak emissive intensity on hover
+const FLIGHT_MS = 413; // throw speed
+const HOVER_SCALE = 0.14;
+const HOVER_GLOW = 0.34; // peak emissive on hover
 
 function buildTomato(): THREE.Group {
   const g = new THREE.Group();
   const body = new THREE.Mesh(
     new THREE.SphereGeometry(0.5, 28, 20),
-    // emissive (intensity 0 at rest) is raised on hover for a subtle glow.
     new THREE.MeshStandardMaterial({ color: 0xd62b1f, roughness: 0.42, metalness: 0.0, emissive: 0xd62b1f, emissiveIntensity: 0 })
   );
   body.scale.set(1, 0.86, 1); // slightly squashed, tomato-ish
@@ -60,6 +60,16 @@ function buildTomato(): THREE.Group {
   return g;
 }
 
+const collectMaterials = (g: THREE.Object3D): THREE.Material[] => {
+  const set = new Set<THREE.Material>();
+  g.traverse((o) => {
+    const m = (o as THREE.Mesh).material;
+    if (Array.isArray(m)) m.forEach((x) => set.add(x));
+    else if (m) set.add(m);
+  });
+  return [...set];
+};
+
 interface Flight {
   mesh: THREE.Group;
   from: THREE.Vector3;
@@ -72,42 +82,20 @@ interface Flight {
 const easeIn = (p: number) => p * p;
 
 export function makeTomato(camera: THREE.PerspectiveCamera, scene: THREE.Scene): TomatoView {
-  const group = new THREE.Group();
-  group.matrixAutoUpdate = false;
   const spinner = buildTomato();
-  group.add(spinner);
-  scene.add(group);
   const bodyMat = (spinner.getObjectByName("tomatoBody") as THREE.Mesh).material as THREE.MeshStandardMaterial;
 
-  let visible = false;
-  let spin = 0;
-  let hover = false;
-  let hoverAmt = 0; // eased 0..1 hover strength
+  const pu = makePowerup({
+    camera, scene, spinner, materials: collectMaterials(spinner),
+    idlePos: IDLE.pos, scale: IDLE.scale, spinSpeed: SPIN_SPEED,
+    applySpin: (s, a) => s.quaternion.setFromAxisAngle(SPIN_AXIS, a),
+    hoverScale: HOVER_SCALE,
+    applyState: (_active, hover) => { bodyMat.emissiveIntensity = HOVER_GLOW * hover; },
+  });
+
   const flights: Flight[] = [];
-
-  const local = new THREE.Matrix4();
-  const id = new THREE.Quaternion();
-  const sc = new THREE.Vector3();
-  const ray = new THREE.Raycaster();
-  const ndc = new THREE.Vector2();
-
   const update = (dt: number) => {
-    group.visible = visible;
-    if (visible) {
-      hoverAmt += ((hover ? 1 : 0) - hoverAmt) * Math.min(1, dt * 12); // ease toward target
-      bodyMat.emissiveIntensity = HOVER_GLOW * hoverAmt;
-      const s = IDLE.scale * (1 + HOVER_SCALE * hoverAmt);
-      spin += dt * SPIN_SPEED;
-      spinner.quaternion.setFromAxisAngle(SPIN_AXIS, spin);
-      camera.updateMatrixWorld();
-      local.compose(IDLE.pos, id, sc.set(s, s, s));
-      group.matrix.multiplyMatrices(camera.matrixWorld, local);
-      group.matrixWorldNeedsUpdate = true;
-    } else if (hoverAmt !== 0) {
-      hoverAmt = 0;
-      bodyMat.emissiveIntensity = 0;
-    }
-    // advance flights
+    pu.update(dt);
     for (let i = flights.length - 1; i >= 0; i--) {
       const f = flights[i];
       f.t += (dt * 1000) / FLIGHT_MS;
@@ -115,8 +103,7 @@ export function makeTomato(camera: THREE.PerspectiveCamera, scene: THREE.Scene):
       f.mesh.position.lerpVectors(f.from, f.to, easeIn(p));
       f.mesh.position.y += Math.sin(p * Math.PI) * f.arc; // parabolic lift
       f.mesh.rotateOnAxis(SPIN_AXIS, dt * 9); // fast tumble in flight
-      const s = 0.32 * (1 - 0.45 * p); // shrink slightly as it lands
-      f.mesh.scale.setScalar(s);
+      f.mesh.scale.setScalar(0.32 * (1 - 0.45 * p)); // shrink slightly as it lands
       if (p >= 1) {
         scene.remove(f.mesh);
         flights.splice(i, 1);
@@ -126,20 +113,13 @@ export function makeTomato(camera: THREE.PerspectiveCamera, scene: THREE.Scene):
   };
 
   return {
-    group,
-    setVisible: (v) => { visible = v; if (!v) hover = false; },
-    setHover: (v) => { hover = v; },
+    group: pu.group,
+    setVisible: pu.setVisible,
+    setActive: pu.setActive,
+    setHover: pu.setHover,
     update,
-    hitTest: (x, y) => {
-      if (!visible) return false;
-      ndc.set(x, y);
-      ray.setFromCamera(ndc, camera);
-      return ray.intersectObject(group, true).length > 0;
-    },
-    cornerWorldPos: (out) => {
-      camera.updateMatrixWorld();
-      return out.copy(IDLE.pos).applyMatrix4(camera.matrixWorld);
-    },
+    hitTest: pu.hitTest,
+    cornerWorldPos: pu.cornerWorldPos,
     launch: (from, to, onLand) => {
       const mesh = buildTomato();
       mesh.position.copy(from);

@@ -66,9 +66,9 @@ export function setupScene(): SceneContext {
     // emissive golden chalk (≈1.7) does. Tunable live via the debug panel.
     bloom = new UnrealBloomPass(
       new THREE.Vector2(window.innerWidth, window.innerHeight),
-      0.85, // strength
-      0.5, // radius
-      1.0 // threshold
+      0.43, // strength (dialed in via the debug sliders)
+      0.12, // radius
+      1.36 // threshold — above the brightest board text so lettering never blooms
     );
     composer.addPass(bloom);
     composer.addPass(new OutputPass());
