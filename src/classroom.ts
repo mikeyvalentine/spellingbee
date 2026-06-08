@@ -434,20 +434,20 @@ function pillPath(c: CanvasRenderingContext2D, x: number, y: number, w: number, 
 // short translucent chalk strokes + grain. Generated ONCE (random at build time)
 // so it never flickers when the board re-renders.
 function makeChalkPattern(ctx: CanvasRenderingContext2D, base: string): CanvasPattern | string {
-  const S = 200;
+  const S = 220;
   const t = document.createElement("canvas");
   t.width = t.height = S;
   const c = t.getContext("2d")!;
-  c.fillStyle = base;
+  // Darker GOLD base — this is what shows in the gaps between scribbles (a deeper
+  // yellow, never brown), so the fill reads as "coloured in" rather than solid.
+  c.fillStyle = "#d99e16";
   c.fillRect(0, 0, S, S);
   c.lineCap = "round";
-  const stroke = (count: number, baseAng: number, spread: number, minLen: number, maxLen: number, minA: number, maxA: number, minW: number, maxW: number) => {
+  const scribble = (count: number, baseAng: number, spread: number, minLen: number, maxLen: number, col: string, minA: number, maxA: number, minW: number, maxW: number) => {
     for (let i = 0; i < count; i++) {
       const x = Math.random() * S, y = Math.random() * S, len = minLen + Math.random() * (maxLen - minLen);
       const ang = (baseAng + (Math.random() - 0.5) * spread) * (Math.PI / 180);
-      const light = Math.random() < 0.58;
-      const a = (minA + Math.random() * (maxA - minA)).toFixed(2);
-      c.strokeStyle = light ? `rgba(255,250,208,${a})` : `rgba(146,100,6,${a})`;
+      c.strokeStyle = `rgba(${col},${(minA + Math.random() * (maxA - minA)).toFixed(2)})`;
       c.lineWidth = minW + Math.random() * (maxW - minW);
       c.beginPath();
       c.moveTo(x, y);
@@ -455,15 +455,17 @@ function makeChalkPattern(ctx: CanvasRenderingContext2D, base: string): CanvasPa
       c.stroke();
     }
   };
-  // Bold primary streaks (one diagonal) + a lighter cross-hatch the other way.
-  stroke(460, -32, 26, 16, 60, 0.22, 0.55, 1.6, 4.5);
-  stroke(150, 46, 24, 12, 36, 0.14, 0.34, 1.2, 3);
-  // Visible grain/dust.
-  for (let i = 0; i < 540; i++) {
-    const sz = 1.5 + Math.random() * 2;
-    c.fillStyle = Math.random() < 0.5
-      ? `rgba(255,250,215,${(0.16 + Math.random() * 0.24).toFixed(2)})`
-      : `rgba(110,76,4,${(0.14 + Math.random() * 0.2).toFixed(2)})`;
+  // Bright-yellow scribbles in a few directions (back-and-forth colouring),
+  // building up coverage over the gold base but leaving streaky gaps.
+  scribble(360, -28, 30, 26, 72, "255,221,75", 0.5, 0.85, 4, 9);
+  scribble(300, 32, 30, 22, 64, "255,227,92", 0.45, 0.8, 4, 8);
+  scribble(170, 88, 42, 18, 50, "255,214,60", 0.4, 0.72, 3, 7);
+  // Cream chalk highlights (the visible chalk dust catching light).
+  scribble(170, -28, 44, 14, 46, "255,249,212", 0.2, 0.48, 1.5, 4);
+  // Light dust grain only — no dark specks.
+  for (let i = 0; i < 240; i++) {
+    const sz = 1.4 + Math.random() * 1.8;
+    c.fillStyle = `rgba(255,247,205,${(0.12 + Math.random() * 0.2).toFixed(2)})`;
     c.fillRect(Math.random() * S, Math.random() * S, sz, sz);
   }
   return ctx.createPattern(t, "repeat") ?? base;
