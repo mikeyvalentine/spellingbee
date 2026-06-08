@@ -115,6 +115,18 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
   let turnTypeStart = 0; // ms timestamp of the first keystroke this turn (for WPM)
   let prevKeyLen = 0; // previous keyText length this turn (to detect backspaces)
 
+  // ---- anti-cheat: inhuman typing speed ----
+  // WPM here is measured per WORD (chars/5 over the time from the first to the
+  // last keystroke), NOT a paragraph average — short, already-heard words can be
+  // bursted fast, so the bar is set well above elite human bursts (~200-256 WPM):
+  // sustaining this average across a whole 6+ letter word is macro/script territory.
+  const INHUMAN_WPM = 280; // per-word average flagged as inhuman
+  const MIN_EVAL_LEN = 6; // only judge words this long (short words are too noisy)
+  const STRIKES_TO_SPECTATE = 3; // flagged rounds before being bumped to spectator
+  const fastStrikes = new Map(); // id -> count of inhuman rounds this match
+  let turnMaxLen = 0; // highest typed-letter count reached this turn
+  let turnFastWpm = 0; // the per-word WPM at that high-water mark (stable average)
+
   const matchAccuracy = (id) => {
     const st = playerStats.get(id);
     if (!st || st.letters === 0) return 100;
@@ -132,6 +144,8 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
     else if (delta < 0) st.corrections += -delta; // a backspace = a correction = a typo
     const mins = turnTypeStart ? (Date.now() - turnTypeStart) / 60000 : 0;
     const wpm = mins > 0 ? Math.round(len / 5 / mins) : 0;
+    // Track the WPM at the longest input reached (= avg speed to type the word).
+    if (len > turnMaxLen) { turnMaxLen = len; turnFastWpm = wpm; }
     return { wpm, accuracy: matchAccuracy(id) };
   };
 
@@ -320,6 +334,7 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
     lap = 1;
     usedWords.clear(); // no repeated words within a match
     playerStats.clear(); // reset per-player accuracy for the new match
+    fastStrikes.clear(); // reset inhuman-speed strikes for the new match
     chalkUsers.clear(); // everyone gets a fresh golden chalk this match
     phase = "match";
     broadcast({ type: "bee_match_start", order: [...order], mode });
@@ -405,6 +420,8 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
     keyText = ""; // reset the board for spectator catch-up
     turnTypeStart = 0; // reset the WPM clock for this turn
     prevKeyLen = 0;
+    turnMaxLen = 0; // reset the anti-cheat per-word speed trackers
+    turnFastWpm = 0;
     tomatoThrowers.clear(); // fresh tomato for everyone this turn
     turnEndsAt = 0;
     turnReveal = null; // no golden-chalk reveal yet this turn
@@ -454,6 +471,15 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
     // spelling is never marked wrong.
     const correct = (text || "").toLowerCase().replace(/[^a-z]/g, "") === word;
     if (!correct) alive.delete(speller);
+    // Anti-cheat: an inhuman per-word typing speed (on a long-enough word) earns a
+    // strike; after STRIKES_TO_SPECTATE strikes in a match the player is bumped to
+    // spectator. Bots are exempt.
+    let demoted = false;
+    if (correct && !isBot(speller) && turnMaxLen >= MIN_EVAL_LEN && turnFastWpm >= INHUMAN_WPM) {
+      const n = (fastStrikes.get(speller) || 0) + 1;
+      fastStrikes.set(speller, n);
+      if (n >= STRIKES_TO_SPECTATE && alive.has(speller)) { alive.delete(speller); demoted = true; }
+    }
     broadcast({
       type: "bee_turn_result",
       spellerId: speller,
@@ -463,6 +489,8 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
       alive: [...alive],
       guess: (typeof text === "string" ? text : keyText) || "", // what they spelled
     });
+    // Tell the demoted player they're now spectating (and why).
+    if (demoted) sendTo(speller, { type: "bee_forcespectate", reason: "Removed for inhuman typing speed" });
     const multiplayer = order.length >= 2;
     const over = multiplayer ? alive.size <= 1 : alive.size === 0;
     if (over) {

@@ -749,6 +749,20 @@ export function setupBee(opts: BeeOpts): BeeStage {
         break;
       }
 
+      case "bee_forcespectate": {
+        // Server bumped us to spectator (e.g. flagged for inhuman typing speed).
+        amSpectator = true;
+        amSpeller = false;
+        answered = true;
+        if (chalkAiming) cancelAim();
+        setSpec(true);
+        if (m.reason) statusEl.textContent = String(m.reason);
+        updateMatchHud();
+        updateTomatoBtn();
+        if (isTouch) input.blur();
+        break;
+      }
+
       case "bee_over": {
         cancelAnimationFrame(timerRaf);
         matchOver = true; // hide the board replay/confirm buttons on the end screen
