@@ -414,7 +414,8 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
     broadcast({
       type: "bee_turn",
       spellerId: turnSpeller,
-      round: turnRound,
+      round: turnRound, // per-turn id (used internally for audio/staleness matching)
+      lap, // the displayed "round" — all players spelling once = one lap
       length: turnWord.length,
       tier: currentTier,
       accuracy: matchAccuracy(turnSpeller), // cumulative match accuracy for the stats board

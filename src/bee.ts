@@ -101,15 +101,14 @@ export function setupBee(opts: BeeOpts): BeeStage {
   } as any);
   document.body.appendChild(specBanner);
 
-  // Replay button pinned to the chalkboard's bottom-right corner (the only HUD
-  // shown during a turn — the rest of the modal is gone).
+  // Replay button pinned to the chalkboard's bottom-LEFT corner.
   const boardReplay = document.createElement("button");
   boardReplay.id = "board-replay";
   boardReplay.textContent = "↺ Replay"; // round replay arrow + chalk text
   Object.assign(boardReplay.style, {
     position: "fixed", zIndex: "15", display: "none",
-    // Tucked into the board's bottom-right corner (a hair left + down).
-    transform: "translate(calc(-100% - 12px), calc(-100% + 4px))",
+    // Anchored at the board's bottom-left corner, nudged inward.
+    transform: "translate(10px, calc(-100% - 4px))",
     background: "none", border: "0", padding: "0", cursor: "pointer",
     // Styled like the muted "ROUND X" header: greyer chalk, a bit smaller.
     color: "rgba(244,241,232,0.55)",
@@ -120,6 +119,23 @@ export function setupBee(opts: BeeOpts): BeeStage {
     if (lastBuffer) playBuffer(lastBuffer);
   });
   document.body.appendChild(boardReplay);
+
+  // Checkmark at the chalkboard's bottom-RIGHT corner — confirms the speller's
+  // word (same as pressing Enter). Only shown to the speller, before they answer.
+  const boardCheck = document.createElement("button");
+  boardCheck.id = "board-check";
+  boardCheck.textContent = "✔";
+  boardCheck.title = "Confirm your word (Enter)";
+  Object.assign(boardCheck.style, {
+    position: "fixed", zIndex: "15", display: "none",
+    transform: "translate(calc(-100% - 10px), calc(-100% - 2px))",
+    background: "none", border: "0", padding: "0", cursor: "pointer",
+    color: "#9ff58a", // green = confirm
+    font: "700 32px 'ABC Stefan Simple', system-ui, sans-serif",
+    textShadow: "0 2px 5px rgba(0,0,0,0.5)",
+  } as any);
+  boardCheck.addEventListener("click", () => submit());
+  document.body.appendChild(boardCheck);
 
   // ---- tomato power-up: throw at the speller's word to splat 3 cells ----
   // Available to active (alive, non-speller, non-spectator) players, once per turn.
@@ -523,7 +539,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
       case "bee_turn": {
         activeSpeller = m.spellerId;
         curLength = m.length;
-        curRound = m.round;
+        curRound = m.lap ?? m.round; // display the lap as the round (all players = 1)
         curTier = tierLabel(m.tier ?? "");
         curTierColor = tierColor(m.tier ?? "easy");
         amSpeller = m.spellerId === localId;
@@ -647,31 +663,31 @@ export function setupBee(opts: BeeOpts): BeeStage {
     }
   };
 
-  // Project the board's four corners and place the Replay button at the one that
-  // lands bottom-right on screen.
+  // Project the board's four corners and place an element at a requested bottom
+  // corner ("bl" = bottom-left, "br" = bottom-right) on screen.
   const cornerV = new THREE.Vector3();
-  const positionBoardReplay = () => {
+  const positionBoardCorner = (el: HTMLElement, corner: "bl" | "br") => {
     const mesh = classroom.boardMesh as THREE.Mesh;
     const geo = mesh.geometry as THREE.PlaneGeometry;
     const hw = (geo.parameters?.width ?? 4) / 2;
     const hh = (geo.parameters?.height ?? 2) / 2;
     mesh.updateWorldMatrix(true, false);
-    let bx = -Infinity;
-    let by = -Infinity;
-    let best = -Infinity;
+    let bx = 0, by = 0, best = -Infinity;
     for (const [x, y] of [[-hw, -hh], [hw, -hh], [-hw, hh], [hw, hh]]) {
       cornerV.set(x, y, 0).applyMatrix4(mesh.matrixWorld).project(camera);
       const sx = (cornerV.x * 0.5 + 0.5) * window.innerWidth;
       const sy = (-cornerV.y * 0.5 + 0.5) * window.innerHeight;
-      if (sx + sy > best) {
-        best = sx + sy;
+      // bottom = largest sy; left = smallest sx, right = largest sx.
+      const metric = sy + (corner === "bl" ? -sx : sx);
+      if (metric > best) {
+        best = metric;
         bx = sx;
         by = sy;
       }
     }
-    boardReplay.style.left = `${bx}px`;
-    boardReplay.style.top = `${by}px`;
-    boardReplay.style.display = "block";
+    el.style.left = `${bx}px`;
+    el.style.top = `${by}px`;
+    el.style.display = "block";
   };
 
   return {
@@ -696,10 +712,17 @@ export function setupBee(opts: BeeOpts): BeeStage {
         }
       }
 
-      // Pin the Replay button to the chalkboard's bottom-right corner. On touch
-      // the slim match bar carries Replay instead, so skip the floating one.
-      if (phase === "match" && !isTouch) positionBoardReplay();
-      else boardReplay.style.display = "none";
+      // Pin the Replay (bottom-left) + the speller's Confirm checkmark
+      // (bottom-right) to the board. On touch the slim match bar + keyboard
+      // handle these, so skip the floating ones.
+      if (phase === "match" && !isTouch) {
+        positionBoardCorner(boardReplay, "bl");
+        if (amSpeller && !answered) positionBoardCorner(boardCheck, "br");
+        else boardCheck.style.display = "none";
+      } else {
+        boardReplay.style.display = "none";
+        boardCheck.style.display = "none";
+      }
     },
     handle,
   };
