@@ -23,9 +23,10 @@ const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const TILT_DIR = new THREE.Vector3(0.30, 1, 0.06).normalize(); // lean, matching the tomato
 const SPIN_SPEED = 0.85; // rad/s
 const HOVER_SCALE = 0.14;
-const HOVER_GLOW = 0.5;
+const BASE_GLOW = 0.22; // resting emissive glow (active chalk)
+const HOVER_GLOW = 0.45; // extra emissive on hover
 
-const GOLD = 0xf2c43d, GOLD_TIP = 0xfff0c0;
+const GOLD = 0xf3ecb8, GOLD_TIP = 0xfffbe6; // warm yellow-white
 const GREY = 0x8d8d93, GREY_TIP = 0xc7c7cc; // "not your turn" disabled look
 
 function buildChalk(): THREE.Group {
@@ -96,7 +97,8 @@ export function makeChalk(camera: THREE.PerspectiveCamera, scene: THREE.Scene): 
     if (visible) {
       hoverAmt += ((hover ? 1 : 0) - hoverAmt) * Math.min(1, dt * 12);
       const eff = active ? hoverAmt : 0; // greyed chalk never scales/glows
-      bodyMat.emissiveIntensity = HOVER_GLOW * eff;
+      // Active chalk has a constant soft glow; hover brightens it. Greyed = none.
+      bodyMat.emissiveIntensity = active ? BASE_GLOW + HOVER_GLOW * eff : 0;
       const s = IDLE.scale * (1 + HOVER_SCALE * eff);
       spin += dt * SPIN_SPEED;
       spinQ.setFromAxisAngle(Y_AXIS, spin);
