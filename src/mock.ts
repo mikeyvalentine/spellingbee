@@ -9,8 +9,11 @@ export function startMock(): RoomSource {
   // A unique id per page load so multiple local tabs/frames don't collide as the
   // same player on the relay server.
   const id = "me-" + Math.random().toString(36).slice(2, 8);
+  // Dev: ?room=foo lets separate local tabs share/split rooms for testing.
+  const roomKey = new URLSearchParams(location.search).get("room") || "global";
   return {
     localUserId: id,
+    roomKey,
     onParticipants(cb) {
       setTimeout(() => cb([{ id, name: "You" }]), 0);
     },

@@ -12,6 +12,13 @@ import { configureTts, previewMp3, setVoice } from "../server/tts.js";
 
 export { BeeRoom } from "./room.js";
 
+// Keep room names bounded + predictable (idFromName accepts anything, but we
+// don't want unbounded/garbage keys). Falls back to one shared default room.
+function sanitizeRoom(raw) {
+  const s = (raw || "").slice(0, 80).replace(/[^a-zA-Z0-9:_-]/g, "");
+  return s || "global";
+}
+
 async function handleToken(request, env) {
   try {
     const { code } = await request.json();
@@ -61,8 +68,11 @@ export default {
     if (p === "/api/voice-preview") return handleVoicePreview(url, env);
 
     if (p === "/ws") {
-      // One shared room for the whole app instance.
-      const id = env.BEE_ROOM.idFromName("global");
+      // Route to the requested room: `call:<instanceId>` (private per Discord
+      // call), `pub:<id>` (public matchmaking), or a default. The DO reads the
+      // same ?room= from the request URL for its own identity.
+      const room = sanitizeRoom(url.searchParams.get("room"));
+      const id = env.BEE_ROOM.idFromName(room);
       return env.BEE_ROOM.get(id).fetch(request);
     }
 

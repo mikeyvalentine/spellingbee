@@ -47,6 +47,10 @@ export async function initDiscord(): Promise<RoomSource> {
   const auth = await sdk.commands.authenticate({ access_token });
   const localUserId = auth.user.id;
 
+  // Each Activity instance (one launch in one voice channel) has a stable id —
+  // use it so every call gets its own private game room by default.
+  const roomKey = `call:${sdk.instanceId}`;
+
   let participantsCb: ((list: Participant[]) => void) | null = null;
 
   const toParticipant = (p: {
@@ -79,6 +83,7 @@ export async function initDiscord(): Promise<RoomSource> {
 
   return {
     localUserId,
+    roomKey,
     onParticipants(cb) {
       participantsCb = cb;
       cb(initialParticipants); // re-emit the initial set now that we have a listener

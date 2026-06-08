@@ -59,11 +59,14 @@ async function main(): Promise<void> {
   // ---- networking ----
   // Inside Discord every socket must ride the proxy; elsewhere hit /ws directly.
   // VITE_WS_URL overrides both.
-  const wsUrl =
+  const wsBase =
     import.meta.env.VITE_WS_URL ||
     (inDiscord
       ? `wss://${window.location.host}/.proxy/ws`
       : `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws`);
+  // Route to this client's room: Discord => its call's private room; otherwise a
+  // dev default. Public matchmaking later reconnects with a different room key.
+  const wsUrl = `${wsBase}?room=${encodeURIComponent(source.roomKey)}`;
   const net = connectNet(wsUrl, localId, avatars.modelCount);
   // Models are assigned deterministically by seat/chair (see CHAIR_MODELS in
   // bee.ts), so we ignore the server's per-player model assignment here.
