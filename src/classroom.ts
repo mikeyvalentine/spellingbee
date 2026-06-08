@@ -434,28 +434,37 @@ function pillPath(c: CanvasRenderingContext2D, x: number, y: number, w: number, 
 // short translucent chalk strokes + grain. Generated ONCE (random at build time)
 // so it never flickers when the board re-renders.
 function makeChalkPattern(ctx: CanvasRenderingContext2D, base: string): CanvasPattern | string {
+  const S = 200;
   const t = document.createElement("canvas");
-  t.width = t.height = 180;
+  t.width = t.height = S;
   const c = t.getContext("2d")!;
   c.fillStyle = base;
-  c.fillRect(0, 0, 180, 180);
+  c.fillRect(0, 0, S, S);
   c.lineCap = "round";
-  for (let i = 0; i < 260; i++) {
-    const x = Math.random() * 180, y = Math.random() * 180, len = 10 + Math.random() * 26;
-    const ang = (-32 + Math.random() * 16) * (Math.PI / 180); // mostly one diagonal
-    const light = Math.random() < 0.6;
-    c.strokeStyle = light
-      ? `rgba(255,252,225,${0.05 + Math.random() * 0.13})`
-      : `rgba(176,128,16,${0.05 + Math.random() * 0.11})`;
-    c.lineWidth = 1 + Math.random() * 2.6;
-    c.beginPath();
-    c.moveTo(x, y);
-    c.lineTo(x + Math.cos(ang) * len, y + Math.sin(ang) * len);
-    c.stroke();
-  }
-  for (let i = 0; i < 340; i++) {
-    c.fillStyle = Math.random() < 0.5 ? "rgba(255,252,228,0.12)" : "rgba(120,88,8,0.09)";
-    c.fillRect(Math.random() * 180, Math.random() * 180, 1.6, 1.6);
+  const stroke = (count: number, baseAng: number, spread: number, minLen: number, maxLen: number, minA: number, maxA: number, minW: number, maxW: number) => {
+    for (let i = 0; i < count; i++) {
+      const x = Math.random() * S, y = Math.random() * S, len = minLen + Math.random() * (maxLen - minLen);
+      const ang = (baseAng + (Math.random() - 0.5) * spread) * (Math.PI / 180);
+      const light = Math.random() < 0.58;
+      const a = (minA + Math.random() * (maxA - minA)).toFixed(2);
+      c.strokeStyle = light ? `rgba(255,250,208,${a})` : `rgba(146,100,6,${a})`;
+      c.lineWidth = minW + Math.random() * (maxW - minW);
+      c.beginPath();
+      c.moveTo(x, y);
+      c.lineTo(x + Math.cos(ang) * len, y + Math.sin(ang) * len);
+      c.stroke();
+    }
+  };
+  // Bold primary streaks (one diagonal) + a lighter cross-hatch the other way.
+  stroke(460, -32, 26, 16, 60, 0.22, 0.55, 1.6, 4.5);
+  stroke(150, 46, 24, 12, 36, 0.14, 0.34, 1.2, 3);
+  // Visible grain/dust.
+  for (let i = 0; i < 540; i++) {
+    const sz = 1.5 + Math.random() * 2;
+    c.fillStyle = Math.random() < 0.5
+      ? `rgba(255,250,215,${(0.16 + Math.random() * 0.24).toFixed(2)})`
+      : `rgba(110,76,4,${(0.14 + Math.random() * 0.2).toFixed(2)})`;
+    c.fillRect(Math.random() * S, Math.random() * S, sz, sz);
   }
   return ctx.createPattern(t, "repeat") ?? base;
 }
@@ -850,11 +859,11 @@ function makeStatsBoard(): StatsBoard {
   let state: { name: string; wpm: number; acc: number } | null = null;
   // Yellow "coloured-in with chalk" fill for the name pill (built once).
   const namePill = makeChalkPattern(ctx, "#ffd23b");
-  // A "LABEL:  value" row, label muted + smaller, value bright + bigger.
+  // A "LABEL:  value" row, label muted + smaller, value bright + bigger (+20%).
   const statRow = (label: string, value: string, y: number): Line => ({
     glyphs: layoutCentered(ctx, [
-      { text: `${label}:  `, color: "rgba(244,241,232,0.66)", font: `600 40px ${FONT}` },
-      { text: value, color: "rgba(244,241,232,0.96)", font: `700 60px ${FONT}` },
+      { text: `${label}:  `, color: "rgba(244,241,232,0.66)", font: `600 48px ${FONT}` },
+      { text: value, color: "rgba(244,241,232,0.96)", font: `700 72px ${FONT}` },
     ], W / 2, y),
   });
   const rebuild = () => {
@@ -864,8 +873,8 @@ function makeStatsBoard(): StatsBoard {
     const nameGlyphs = layoutCentered(ctx, [{ text: state.name, color: "#1b1b1b", font: `700 52px ${FONT}` }], W / 2, 80);
     surf.setLines([
       { glyphs: nameGlyphs, pill: namePill },
-      statRow("WPM", String(state.wpm), 228),
-      statRow("ACC", `${state.acc}%`, 322),
+      statRow("WPM", String(state.wpm), 224),
+      statRow("ACC", `${state.acc}%`, 326),
     ]);
   };
 
