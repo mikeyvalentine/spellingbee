@@ -31,6 +31,9 @@ const SEAT_OFFSETS: [number, number, number][] = [
 ];
 const BOARD_W = 4.4;
 const BOARD_H = 2.0;
+// Secondary (stats) board base plane — portrait, matching its 512×680 canvas.
+const STATS_W = 2.4;
+const STATS_H = 3.2;
 
 export interface CameraPose {
   pos: THREE.Vector3;
@@ -64,16 +67,24 @@ export interface Classroom {
   setBoardResult(word: string, correct: boolean): void;
   clearBoard(length: number): void;
   setBoardHeader(text: string, accent?: { text: string; color: string } | null): void;
+  /** Per-player stats on the secondary (left) board: name, WPM, accuracy %. */
+  setStats(name: string, wpm: number, accuracy: number): void;
+  clearStats(): void;
+  /** Write both boards' current content in, one char at a time (turn start). */
+  revealBoards(): void;
+  /** Erase both boards, one char at a time (during the result pause). */
+  hideBoards(onDone?: () => void): void;
 }
 
 const norm = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
 export async function loadClassroom(scene: THREE.Scene): Promise<Classroom> {
   const board = makeChalkboard();
+  const stats = makeStatsBoard();
   let layout: ClassroomLayout;
   try {
     const gltf = await new GLTFLoader().loadAsync(GLB_URL);
-    layout = buildFromGlb(gltf.scene, board);
+    layout = buildFromGlb(gltf.scene, board, stats);
   } catch (e) {
     console.warn("classroom.glb not loaded, using procedural fallback:", e);
     layout = buildProcedural(board);
@@ -96,6 +107,16 @@ export async function loadClassroom(scene: THREE.Scene): Promise<Classroom> {
     setBoardResult: board.setResult,
     clearBoard: board.clear,
     setBoardHeader: board.setHeader,
+    setStats: stats.setStats,
+    clearStats: stats.clear,
+    revealBoards: () => {
+      board.writeIn();
+      stats.writeIn();
+    },
+    hideBoards: (onDone) => {
+      stats.eraseOut();
+      board.eraseOut(onDone);
+    },
   };
 }
 
@@ -111,7 +132,7 @@ interface ClassroomLayout {
 // ---------------------------------------------------------------------------
 // GLB classroom.
 // ---------------------------------------------------------------------------
-function buildFromGlb(root: THREE.Object3D, board: Chalkboard): ClassroomLayout {
+function buildFromGlb(root: THREE.Object3D, board: Chalkboard, stats: StatsBoard): ClassroomLayout {
   root.updateMatrixWorld(true);
 
   const cams = new Map<string, THREE.PerspectiveCamera>();
@@ -175,7 +196,9 @@ function buildFromGlb(root: THREE.Object3D, board: Chalkboard): ClassroomLayout 
   const lights = buildLights(root, objs);
 
   // Chalk-text plane auto-mounted onto the front wall, facing the class (-Z).
-  mountBoard(root, objs.get("frontwall"), board);
+  const mainCx = mountBoard(root, objs.get("frontwall"), board);
+  // Stats plane on the secondary (tall, narrow) board off to the side.
+  mountStatsBoard(root, stats, mainCx);
 
   return { root, lobbyCam, matchCam, seats, spellerPos, lights };
 }
@@ -248,31 +271,43 @@ function buildWindowLight(plane?: THREE.Object3D): THREE.RectAreaLight {
   return light;
 }
 
-function mountBoard(root: THREE.Object3D, frontWall: THREE.Object3D | undefined, board: Chalkboard) {
-  // Find the actual chalkboard panel: a flat mesh in the front of the room that
-  // protrudes furthest into it (i.e. the board mounted on the front wall).
-  let best: { c: THREE.Vector3; size: THREE.Vector3; minZ: number } | null = null;
+interface BoardFit {
+  c: THREE.Vector3;
+  size: THREE.Vector3;
+  minZ: number;
+}
+
+// All flat, front-of-room board panels (wide enough to be a board, thin in z).
+function boardPanels(root: THREE.Object3D): BoardFit[] {
+  const out: BoardFit[] = [];
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;
     const n = norm(o.name);
-    if (/wall|floor|ceiling|window|door|light|player|sphere|current/.test(n)) return;
+    if (/wall|floor|ceiling|window|door|light|player|sphere|current|lamp/.test(n)) return;
     const b = new THREE.Box3().setFromObject(mesh);
     const c = b.getCenter(new THREE.Vector3());
     const size = b.getSize(new THREE.Vector3());
-    if (c.z < 3 || c.y < 1 || c.y > 5) return; // front-of-room, board height band
-    if (size.x < 1.2 || size.y < 0.6 || size.z > 0.7) return; // wide, tall, flat
-    if (!best || b.min.z < best.minZ) best = { c, size, minZ: b.min.z };
+    if (c.z < 3 || c.y < 1 || c.y > 5.5) return; // front-of-room, board height band
+    if (size.y < 0.6 || size.z > 0.7 || size.x < 0.6) return; // tall-ish, flat
+    out.push({ c, size, minZ: b.min.z });
   });
+  return out;
+}
+
+// Mounts the main chalk-text plane on the widest front board; returns its center x.
+function mountBoard(root: THREE.Object3D, frontWall: THREE.Object3D | undefined, board: Chalkboard): number {
+  const panels = boardPanels(root).filter((p) => p.size.x >= 1.2);
+  let best: BoardFit | null = null;
+  for (const p of panels) if (!best || p.minZ < best.minZ) best = p; // most protruding
 
   let cx = 0.5, cy = 2.8, z = 8.34, w = BOARD_W, h = BOARD_H;
   if (best) {
-    const fit = best as { c: THREE.Vector3; size: THREE.Vector3; minZ: number };
-    cx = fit.c.x;
-    cy = fit.c.y;
-    z = fit.minZ - 0.02; // just in front of the board's room-facing surface
-    w = Math.min(fit.size.x * 0.9, 6);
-    h = Math.min(fit.size.y * 0.82, 3);
+    cx = best.c.x;
+    cy = best.c.y;
+    z = best.minZ - 0.02;
+    w = Math.min(best.size.x * 0.9, 6);
+    h = Math.min(best.size.y * 0.82, 3);
   } else if (frontWall) {
     const b = new THREE.Box3().setFromObject(frontWall);
     cx = (b.min.x + b.max.x) / 2;
@@ -282,6 +317,22 @@ function mountBoard(root: THREE.Object3D, frontWall: THREE.Object3D | undefined,
   board.mesh.position.set(cx, cy, z);
   board.mesh.rotation.y = Math.PI; // face -Z, toward the seated class
   root.add(board.mesh);
+  return cx;
+}
+
+// Mounts the stats plane on the secondary (narrow) board off to the side of main.
+function mountStatsBoard(root: THREE.Object3D, stats: StatsBoard, mainCx: number) {
+  const side = boardPanels(root)
+    .filter((p) => Math.abs(p.c.x - mainCx) > 2 && p.size.y > 1.8) // off to the side, tall
+    .sort((a, b) => a.minZ - b.minZ)[0]; // most protruding panel there
+  if (!side) {
+    stats.mesh.visible = false; // no secondary board in this GLB
+    return;
+  }
+  stats.mesh.scale.set((side.size.x * 0.86) / STATS_W, (side.size.y * 0.82) / STATS_H, 1);
+  stats.mesh.position.set(side.c.x, side.c.y, side.minZ - 0.02);
+  stats.mesh.rotation.y = Math.PI;
+  root.add(stats.mesh);
 }
 
 // ---------------------------------------------------------------------------
@@ -337,6 +388,150 @@ function buildProcedural(board: Chalkboard): ClassroomLayout {
 // ---------------------------------------------------------------------------
 // Chalkboard: a plane whose texture is a <canvas> redrawn as the speller types.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Animated chalk surface: a canvas/texture whose content "writes in" and
+// "erases" one character at a time, in parallel across its lines.
+// ---------------------------------------------------------------------------
+const WRITE_MS = 60; // ms per character (write-in / erase pace)
+const FONT = "'ABC Stefan Simple', system-ui, sans-serif";
+
+interface Glyph {
+  ch: string;
+  x: number;
+  y: number;
+  font: string;
+  color: string;
+}
+interface Line {
+  glyphs: Glyph[];
+  underlineY?: number;
+}
+interface Surface {
+  tex: THREE.CanvasTexture;
+  ctx: CanvasRenderingContext2D;
+  setLines(lines: Line[]): void; // set content, fully shown
+  writeIn(onDone?: () => void): void;
+  eraseOut(onDone?: () => void): void;
+}
+
+function makeSurface(w: number, h: number): Surface {
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d")!;
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+
+  let lines: Line[] = [];
+  let reveal = Infinity; // chars shown per line = min(reveal, line length)
+  let raf = 0;
+  const maxLen = () => lines.reduce((m, l) => Math.max(m, l.glyphs.length), 0);
+
+  const draw = () => {
+    ctx.clearRect(0, 0, w, h);
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    for (const line of lines) {
+      const n = Math.min(reveal, line.glyphs.length);
+      ctx.shadowColor = "rgba(0,0,0,0.4)";
+      ctx.shadowBlur = 5;
+      for (let i = 0; i < n; i++) {
+        const g = line.glyphs[i];
+        ctx.font = g.font;
+        ctx.fillStyle = g.color;
+        ctx.fillText(g.ch, g.x, g.y);
+      }
+      if (line.underlineY != null && n > 0) {
+        const first = line.glyphs[0];
+        const last = line.glyphs[n - 1];
+        ctx.font = last.font;
+        const endX = last.x + ctx.measureText(last.ch).width;
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = first.color;
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(first.x, line.underlineY);
+        ctx.lineTo(endX, line.underlineY);
+        ctx.stroke();
+      }
+    }
+    ctx.shadowBlur = 0;
+    tex.needsUpdate = true;
+  };
+
+  const run = (from: number, to: number, onDone?: () => void) => {
+    cancelAnimationFrame(raf);
+    reveal = from;
+    const dir = to >= from ? 1 : -1;
+    let last = -1;
+    let acc = 0;
+    const tick = (now: number) => {
+      if (last < 0) last = now;
+      acc += now - last;
+      last = now;
+      while (acc >= WRITE_MS) {
+        acc -= WRITE_MS;
+        reveal += dir;
+        if ((dir > 0 && reveal >= to) || (dir < 0 && reveal <= to)) {
+          reveal = dir > 0 ? Infinity : 0; // writeIn -> show all (for live updates)
+          draw();
+          onDone?.();
+          return;
+        }
+      }
+      draw();
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+  };
+
+  return {
+    tex,
+    ctx,
+    setLines(l) {
+      lines = l;
+      reveal = Infinity;
+      cancelAnimationFrame(raf);
+      draw();
+    },
+    writeIn(onDone) {
+      run(0, maxLen(), onDone);
+    },
+    eraseOut(onDone) {
+      run(maxLen(), 0, onDone);
+    },
+  };
+}
+
+// Lay out a horizontally-centered line of (possibly multi-colored) segments into
+// per-character glyphs at their final positions.
+function layoutCentered(
+  ctx: CanvasRenderingContext2D,
+  segments: { text: string; color: string; font: string }[],
+  cx: number,
+  y: number
+): Glyph[] {
+  let total = 0;
+  for (const s of segments) {
+    ctx.font = s.font;
+    total += ctx.measureText(s.text).width;
+  }
+  let x = cx - total / 2;
+  const glyphs: Glyph[] = [];
+  for (const s of segments) {
+    ctx.font = s.font;
+    for (const ch of s.text) {
+      glyphs.push({ ch, x, y, font: s.font, color: s.color });
+      x += ctx.measureText(ch).width;
+    }
+  }
+  return glyphs;
+}
+
+// ---------------------------------------------------------------------------
+// Main chalkboard: header (ROUND X · TIER) + the word cells/letters.
+// ---------------------------------------------------------------------------
 interface HeaderAccent {
   text: string;
   color: string;
@@ -347,100 +542,132 @@ interface Chalkboard {
   setResult(word: string, correct: boolean): void;
   clear(length: number): void;
   setHeader(text: string, accent?: HeaderAccent | null): void;
+  writeIn(onDone?: () => void): void;
+  eraseOut(onDone?: () => void): void;
 }
 
 function makeChalkboard(): Chalkboard {
-  const canvas = document.createElement("canvas");
-  canvas.width = 1024;
-  canvas.height = 512;
-  const ctx = canvas.getContext("2d")!;
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
-
+  const W = 1024, H = 512;
+  const surf = makeSurface(W, H);
+  const ctx = surf.ctx;
+  const CHALK = "rgba(244,241,232,0.85)";
   const mesh = new THREE.Mesh(
     new THREE.PlaneGeometry(BOARD_W, BOARD_H),
-    new THREE.MeshBasicMaterial({ map: tex, transparent: true })
+    new THREE.MeshBasicMaterial({ map: surf.tex, transparent: true })
   );
   mesh.name = "ChalkboardText";
 
-  // DINAMO ABC Stefan Simple (trial) — registered via @font-face in index.html.
-  const FONT = "'ABC Stefan Simple', system-ui, sans-serif";
   let header = "";
-  let headerAccent: HeaderAccent | null = null; // colored tier word (e.g. MEDIUM in yellow)
-  let lastRender = () => {};
+  let headerAccent: HeaderAccent | null = null;
+  let cells: string[] = [];
+  let cellsColor = "#f4f1e8";
 
-  const drawBase = () => {
-    // Transparent — the GLB's own chalkboard shows through; we only draw chalk.
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (!header) return;
-    ctx.font = `600 46px ${FONT}`;
-    ctx.textBaseline = "middle";
-    ctx.textAlign = "left";
-    ctx.shadowColor = "rgba(0,0,0,0.4)";
-    ctx.shadowBlur = 5;
-    const accText = headerAccent ? ` · ${headerAccent.text}` : "";
-    const mainW = ctx.measureText(header).width;
-    const accW = accText ? ctx.measureText(accText).width : 0;
-    const x = (canvas.width - (mainW + accW)) / 2;
-    ctx.fillStyle = "rgba(244,241,232,0.82)";
-    ctx.fillText(header, x, 70);
-    if (headerAccent) {
-      ctx.fillStyle = headerAccent.color;
-      ctx.fillText(accText, x + mainW, 70);
+  const rebuild = () => {
+    const lines: Line[] = [];
+    if (header) {
+      const segs = [{ text: header, color: CHALK, font: `600 46px ${FONT}` }];
+      if (headerAccent) {
+        segs.push({ text: ` · ${headerAccent.text}`, color: headerAccent.color, font: `600 46px ${FONT}` });
+      }
+      lines.push({ glyphs: layoutCentered(ctx, segs, W / 2, 70) });
     }
-    ctx.shadowBlur = 0;
-  };
-
-  const drawCells = (cells: string[], color: string) => {
-    const n = Math.max(cells.length, 1);
-    const cellW = Math.min(120, 900 / n);
-    const fontSize = Math.min(150, cellW * 1.3);
-    const startX = canvas.width / 2 - (cellW * n) / 2 + cellW / 2;
-    const y = canvas.height / 2 + 45;
-    ctx.font = `700 ${fontSize}px ${FONT}`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillStyle = color;
-    ctx.shadowColor = "rgba(0,0,0,0.35)";
-    ctx.shadowBlur = 6;
-    cells.forEach((ch, i) => ctx.fillText(ch, startX + i * cellW, y));
-    ctx.shadowBlur = 0;
+    if (cells.length) {
+      const n = cells.length;
+      const cellW = Math.min(120, 900 / n);
+      const fontSize = Math.min(150, cellW * 1.3);
+      const startX = W / 2 - (cellW * n) / 2;
+      const font = `700 ${fontSize}px ${FONT}`;
+      const y = H / 2 + 45;
+      ctx.font = font;
+      const glyphs: Glyph[] = cells.map((ch, i) => ({
+        ch,
+        font,
+        color: cellsColor,
+        x: startX + i * cellW + cellW / 2 - ctx.measureText(ch).width / 2,
+        y,
+      }));
+      lines.push({ glyphs });
+    }
+    surf.setLines(lines);
   };
 
   const setGuess = (typed: string, length: number) => {
-    lastRender = () => {
-      drawBase();
-      const t = typed.toUpperCase().slice(0, length);
-      const cells: string[] = [];
-      for (let i = 0; i < length; i++) cells.push(t[i] ?? "_");
-      drawCells(cells, "#f4f1e8");
-      tex.needsUpdate = true;
-    };
-    lastRender();
+    const t = typed.toUpperCase().slice(0, length);
+    cells = [];
+    for (let i = 0; i < length; i++) cells.push(t[i] ?? "_");
+    cellsColor = "#f4f1e8";
+    rebuild();
   };
-
   const setResult = (word: string, correct: boolean) => {
-    lastRender = () => {
-      drawBase();
-      drawCells(word.toUpperCase().split(""), correct ? "#9ff58a" : "#ff8a8a");
-      tex.needsUpdate = true;
-    };
-    lastRender();
+    cells = word.toUpperCase().split("");
+    cellsColor = correct ? "#9ff58a" : "#ff8a8a";
+    rebuild();
   };
-
   const clear = (length: number) => setGuess("", length);
   const setHeader = (text: string, accent: HeaderAccent | null = null) => {
     header = text;
     headerAccent = accent;
-    lastRender();
+    rebuild();
   };
 
   setGuess("", 0);
-  if (document.fonts) {
-    document.fonts.load(`700 100px ${FONT}`).then(() => lastRender()).catch(() => {});
-    document.fonts.ready.then(() => lastRender()).catch(() => {});
-  }
+  if (document.fonts) document.fonts.ready.then(() => rebuild()).catch(() => {});
 
-  return { mesh, setGuess, setResult, clear, setHeader };
+  return { mesh, setGuess, setResult, clear, setHeader, writeIn: surf.writeIn, eraseOut: surf.eraseOut };
+}
+
+// ---------------------------------------------------------------------------
+// Secondary stats board (left of the main board): name (bold/underlined),
+// live WPM, and match accuracy — all in the chalk font, same write-in/erase.
+// ---------------------------------------------------------------------------
+interface StatsBoard {
+  mesh: THREE.Mesh;
+  setStats(name: string, wpm: number, accuracy: number): void;
+  clear(): void;
+  writeIn(onDone?: () => void): void;
+  eraseOut(onDone?: () => void): void;
+}
+
+function makeStatsBoard(): StatsBoard {
+  const W = 512, H = 680;
+  const surf = makeSurface(W, H);
+  const ctx = surf.ctx;
+  const CHALK = "rgba(244,241,232,0.92)";
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(STATS_W, STATS_H),
+    new THREE.MeshBasicMaterial({ map: surf.tex, transparent: true })
+  );
+  mesh.name = "StatsBoardText";
+
+  let state: { name: string; wpm: number; acc: number } | null = null;
+  const line = (text: string, font: string, y: number, underline = false): Line => {
+    const glyphs = layoutCentered(ctx, [{ text, color: CHALK, font }], W / 2, y);
+    return underline ? { glyphs, underlineY: y + 38 } : { glyphs };
+  };
+  const rebuild = () => {
+    if (!state) return surf.setLines([]);
+    surf.setLines([
+      line(state.name, `700 52px ${FONT}`, 70, true),
+      line(String(state.wpm), `700 110px ${FONT}`, 250),
+      line("WPM", `600 38px ${FONT}`, 334),
+      line(`${state.acc}%`, `700 110px ${FONT}`, 480),
+      line("ACCURACY", `600 38px ${FONT}`, 564),
+    ]);
+  };
+
+  if (document.fonts) document.fonts.ready.then(() => rebuild()).catch(() => {});
+
+  return {
+    mesh,
+    setStats: (name, wpm, accuracy) => {
+      state = { name, wpm, acc: accuracy };
+      rebuild();
+    },
+    clear: () => {
+      state = null;
+      rebuild();
+    },
+    writeIn: surf.writeIn,
+    eraseOut: surf.eraseOut,
+  };
 }

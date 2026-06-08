@@ -212,9 +212,11 @@ export function setupBee(opts: BeeOpts): BeeStage {
     seatOrder.forEach((id, i) => {
       avatars.ensure(id, getName(id));
       avatars.setModel(id, CHAIR_MODELS[i % CHAIR_MODELS.length]); // fixed model per chair
-      avatars.setHost(id, id === hostId); // blue "(Host)" nametag for the host
+      avatars.setHost(id, id === hostId); // blue nametag for the host
       avatars.setPosed(id, true); // seated players + speller loop idle, never jump
       avatars.clearEmote(id); // drop a held wrong-answer pose from the previous turn
+      // The current speller's nametag is hidden mid-match (it's on the stats board).
+      avatars.setLabelVisible(id, !(phase === "match" && id === activeSpeller));
       const av = avatars.get(id);
       if (!av) return;
       av.scale.setScalar(1);
@@ -242,8 +244,9 @@ export function setupBee(opts: BeeOpts): BeeStage {
     specBanner.style.display = "none";
     seatOrder = queue;
     classroom.root.visible = true;
-    hud.style.display = "none";
     boardReplay.style.display = "none";
+    classroom.clearStats();
+    updateMatchHud();
     seatPlayers();
   };
 
@@ -256,20 +259,29 @@ export function setupBee(opts: BeeOpts): BeeStage {
     classroom.root.visible = true;
     classroom.setBoardHeader("🐝 Spelling Bee");
     classroom.clearBoard(0);
-    hud.style.display = "none"; // no in-game modal — only the board + Replay button
+    updateMatchHud(); // desktop: hidden · touch: slim bottom bar
     seatPlayers();
   };
 
   // ---------- input ----------
-  // The #m-input is a read-only display of the current guess; typing is captured
-  // globally below so you never have to click to type.
-  input.readOnly = true;
+  // Touch devices have no physical keyboard, so there the #m-input becomes a real
+  // editable field that raises the native keyboard (and the match HUD becomes a
+  // slim bottom bar). On desktop it stays a read-only mirror of the guess — typing
+  // is captured globally below so you never have to click to type.
+  const isTouch = window.matchMedia("(pointer: coarse)").matches;
+  input.readOnly = !isTouch;
 
-  const renderGuess = () => {
+  // Mirror the current guess to the 3D board + spectators (censored). Leaves
+  // input.value alone so it never fights the native field while typing.
+  const pushGuess = () => {
     const shown = censor(typed);
-    input.value = shown;
     classroom.setBoardGuess(shown, curLength);
     net.sendBee({ type: "bee_key", text: shown }); // spectators see the censored guess
+  };
+  // Desktop path: the field is a passive mirror, so echo the censored guess there.
+  const renderGuess = () => {
+    input.value = censor(typed);
+    pushGuess();
   };
 
   const submit = () => {
@@ -277,10 +289,46 @@ export function setupBee(opts: BeeOpts): BeeStage {
     answered = true;
     net.sendBee({ type: "bee_answer", text: typed });
     statusEl.textContent = `🔒 Locked in: ${censor(typed) || "(blank)"}`;
+    updateMatchHud(); // hide the input row now that the guess is locked
   };
 
+  // Show / lay out the bottom match bar. On touch it's the slim
+  // input + replay + timer bar; on desktop it stays hidden (the 3D board and the
+  // floating Replay button are the only match chrome).
+  const updateMatchHud = () => {
+    if (!isTouch || phase !== "match") {
+      hud.style.display = "none";
+      hud.classList.remove("mobile-bar", "no-input");
+      return;
+    }
+    hud.classList.add("mobile-bar");
+    const showInput = amSpeller && !answered && !amSpectator;
+    hud.classList.toggle("no-input", !showInput);
+    hud.style.display = "flex";
+  };
+
+  // Touch typing: the native field is the source of truth. Sanitize to letters,
+  // clamp to the word length, then mirror to the board/spectators.
+  input.addEventListener("input", () => {
+    if (!isTouch || phase !== "match" || !amSpeller || answered) return;
+    const raw = input.value.toLowerCase().replace(/[^a-z]/g, "").slice(0, curLength);
+    if (input.value !== raw) input.value = raw;
+    typed = raw;
+    pushGuess();
+  });
+  input.addEventListener("keydown", (e) => {
+    if (!isTouch || phase !== "match" || !amSpeller || answered) return;
+    if (e.key === "Enter") {
+      submit();
+      input.blur(); // dismiss the native keyboard once locked in
+      e.preventDefault();
+    }
+  });
+
   // Always-listening key capture for the speller (no focus/click required).
+  // Desktop only — on touch the native field above drives the guess.
   window.addEventListener("keydown", (e) => {
+    if (isTouch) return;
     if (phase !== "match" || !amSpeller || answered) return;
     if (e.key === "Enter") {
       submit();
@@ -333,27 +381,32 @@ export function setupBee(opts: BeeOpts): BeeStage {
         typed = ""; // fresh guess; typing is captured globally (no click needed)
         lastBuffer = null; // word audio arrives via bee_audio
         seatPlayers();
+        // Secondary board: current speller's name + (cumulative) accuracy, WPM resets.
+        classroom.setStats(getName(m.spellerId), 0, m.accuracy ?? 100);
 
-        // Loading buffer: the word's audio is still synthesizing (mainly the
-        // first round). Show a loading header until bee_audio lands.
-        classroom.setBoardHeader("🔊 Loading word…");
+        // Stage the boards' content, then write it all in one char at a time.
+        // The tier is known now, so show the round header straight away.
+        classroom.setBoardHeader(`ROUND ${curRound}`, { text: curTier, color: curTierColor });
         classroom.clearBoard(curLength);
+        classroom.revealBoards();
 
         whoEl.textContent = amSpeller
           ? "Your turn — get ready…"
           : `${getName(m.spellerId)} is up…`;
         roundEl.textContent = `Round ${curRound} · ${curTier} · ${m.alive.length} still in`;
         input.value = "";
-        input.style.display = amSpeller ? "block" : "none";
         statusEl.textContent = amSpeller ? "🔊 Getting your word…" : "";
         aliveEl.textContent = "";
         timerbar.style.width = "100%";
+        updateMatchHud(); // (re)show the slim bar on touch; toggles the input row
+        // Raise the native keyboard for the speller on touch devices.
+        if (isTouch && amSpeller) input.focus();
         break;
       }
 
       case "bee_audio":
-        // Word is ready — swap the loading header for the round info.
-        classroom.setBoardHeader(`ROUND ${curRound}`, { text: curTier, color: curTierColor });
+        // Word is ready. The header was already written in at bee_turn — don't
+        // re-set it here, that would abort the board's write-in animation.
         if (amSpeller) {
           whoEl.textContent = "Your turn — spell it!";
           if (!answered) statusEl.textContent = "🔊 Your word is… — type it!";
@@ -366,8 +419,6 @@ export function setupBee(opts: BeeOpts): BeeStage {
 
       case "bee_go":
         countdown(m.duration); // timer starts as the word begins playing
-        // Fallback in case audio failed: ensure the round header is shown.
-        classroom.setBoardHeader(`ROUND ${curRound}`, { text: curTier, color: curTierColor });
         if (amSpeller && !answered) statusEl.textContent = "Type the word, then press Enter.";
         break;
 
@@ -375,12 +426,20 @@ export function setupBee(opts: BeeOpts): BeeStage {
         // Live spectator view of whoever is typing (already censored at the source;
         // censor again defensively). The speller's own board updates locally.
         if (m.spellerId !== localId) classroom.setBoardGuess(censor(m.text || ""), curLength);
+        // Live WPM + accuracy on the secondary stats board (everyone sees it).
+        classroom.setStats(getName(m.spellerId), m.wpm ?? 0, m.accuracy ?? 100);
         break;
 
       case "bee_turn_result": {
         cancelAnimationFrame(timerRaf);
         timerbar.style.width = "0%";
+        answered = true; // turn resolved — close the touch input row + keyboard
+        updateMatchHud();
+        if (isTouch) input.blur();
         classroom.setBoardResult(m.word, m.correct);
+        // Let the result word linger, then erase both boards char-by-char so
+        // they're blank when the next speller's turn writes in.
+        window.setTimeout(() => classroom.hideBoards(), 500);
         // Wrong answer → the speller plays a one-shot reaction (duck, or punch if
         // they have no duck clip) that finishes just before the next round starts.
         if (!m.correct && !avatars.playEmote(m.spellerId, "duck")) {
@@ -390,7 +449,6 @@ export function setupBee(opts: BeeOpts): BeeStage {
           statusEl.textContent = m.correct
             ? "✅ Correct!"
             : `❌ Out — it was “${m.word}”`;
-          if (m.eliminated) input.style.display = "none";
         } else {
           statusEl.textContent = `${getName(m.spellerId)} ${
             m.correct ? "got it ✅" : `missed ❌ — “${m.word}”`
@@ -410,7 +468,10 @@ export function setupBee(opts: BeeOpts): BeeStage {
             : `🏆 ${getName(w)} wins!`
           : `Game over — reached round ${m.rounds}`;
         classroom.setBoardHeader(w ? `🏆 ${getName(w)} wins!` : "Game over");
-        input.style.display = "none";
+        classroom.clearStats();
+        answered = true;
+        updateMatchHud();
+        if (isTouch) input.blur();
         specBanner.style.display = "none";
         // The server reopens the lobby itself a few seconds later (returnToLobby).
         break;
@@ -476,8 +537,9 @@ export function setupBee(opts: BeeOpts): BeeStage {
         }
       }
 
-      // Pin the Replay button to the chalkboard's bottom-right corner.
-      if (phase === "match") positionBoardReplay();
+      // Pin the Replay button to the chalkboard's bottom-right corner. On touch
+      // the slim match bar carries Replay instead, so skip the floating one.
+      if (phase === "match" && !isTouch) positionBoardReplay();
       else boardReplay.style.display = "none";
     },
     handle,

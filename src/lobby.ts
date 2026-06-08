@@ -41,6 +41,17 @@ export function setupLobby(opts: LobbyOpts): LobbyController {
   let selected = "basic";
   let lastState: any = null;
 
+  // Bottom-center "[host]'s Class" label, shown to everyone while in the lobby.
+  const classTitle = document.createElement("div");
+  classTitle.id = "class-title";
+  Object.assign(classTitle.style, {
+    position: "fixed", left: "50%", bottom: "20px", transform: "translateX(-50%)",
+    zIndex: "20", display: "none", color: "#f4f1e8",
+    font: "600 22px system-ui, sans-serif", textShadow: "0 2px 6px rgba(0,0,0,0.6)",
+    pointerEvents: "none", userSelect: "none",
+  } as any);
+  document.body.appendChild(classTitle);
+
   // ---- mode cards ----
   // Only show playable modes for now; the rest stay defined in MODES for later.
   const visibleModes = MODES.filter((m) => !m.locked);
@@ -74,6 +85,8 @@ export function setupLobby(opts: LobbyOpts): LobbyController {
     const inQueue = queue.includes(localId);
     const amReady = ready.includes(localId);
 
+    classTitle.textContent = s.hostId ? `${getName(s.hostId)}'s Class` : "";
+
     rosterEl.innerHTML =
       queue.length === 0
         ? '<div class="roster-empty">Waiting for players…</div>'
@@ -82,7 +95,7 @@ export function setupLobby(opts: LobbyOpts): LobbyController {
               const tick = ready.includes(id) ? "✅" : "⬜";
               const you = id === localId ? " (you)" : "";
               const isHostRow = id === s.hostId;
-              const name = `${isHostRow ? "(Host) " : ""}${getName(id)}${you}`;
+              const name = `${getName(id)}${you}`;
               return `<div class="roster-row"><span class="tick">${tick}</span><span class="roster-name${isHostRow ? " host" : ""}">${name}</span></div>`;
             })
             .join("");
@@ -132,10 +145,12 @@ export function setupLobby(opts: LobbyOpts): LobbyController {
     },
     show() {
       lobbyEl.style.display = "flex";
+      classTitle.style.display = "block";
       if (lastState) render(lastState);
     },
     hide() {
       lobbyEl.style.display = "none";
+      classTitle.style.display = "none";
     },
     selectedMode: () => selected,
   };

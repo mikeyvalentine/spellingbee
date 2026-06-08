@@ -9,7 +9,7 @@ import {
 import { synth } from "./tts.js";
 
 const ROUND_MS = 22000;
-const RESULT_MS = 1800; // pause between turns (show the result, then next round)
+const RESULT_MS = 2200; // pause between turns: ~500ms linger + char-by-char board erase, then next round
 const OVER_MS = 3500; // post-match celebration before the lobby reopens
 
 // Words excluded from every pool: common HOMOPHONES (ambiguous when only heard,
@@ -93,6 +93,31 @@ export function createBee(broadcast, sendTo, getPlayerIds) {
   let queue = []; // join order
   let ready = new Set();
   let keyText = ""; // current speller's typed text (for catching spectators up)
+
+  // ---- per-player typing stats (for the secondary stats board) ----
+  const playerStats = new Map(); // id -> { letters, corrections } (this match)
+  let turnTypeStart = 0; // ms timestamp of the first keystroke this turn (for WPM)
+  let prevKeyLen = 0; // previous keyText length this turn (to detect backspaces)
+
+  const matchAccuracy = (id) => {
+    const st = playerStats.get(id);
+    if (!st || st.letters === 0) return 100;
+    return Math.max(0, Math.min(100, Math.round(((st.letters - st.corrections) / st.letters) * 100)));
+  };
+  // Record a keystroke update for `id`, returning live { wpm, accuracy }.
+  const recordKey = (id, text) => {
+    const len = text.length;
+    if (turnTypeStart === 0 && len > 0) turnTypeStart = Date.now();
+    const delta = len - prevKeyLen;
+    prevKeyLen = len;
+    let st = playerStats.get(id);
+    if (!st) playerStats.set(id, (st = { letters: 0, corrections: 0 }));
+    if (delta > 0) st.letters += delta;
+    else if (delta < 0) st.corrections += -delta; // a backspace = a correction = a typo
+    const mins = turnTypeStart ? (Date.now() - turnTypeStart) / 60000 : 0;
+    const wpm = mins > 0 ? Math.round(len / 5 / mins) : 0;
+    return { wpm, accuracy: matchAccuracy(id) };
+  };
 
   const bots = new Set(); // dev-only AI players
   const isBot = (id) => bots.has(id);
@@ -244,7 +269,8 @@ export function createBee(broadcast, sendTo, getPlayerIds) {
       if (phase !== "match" || speller !== botId || round !== turnRound) return;
       i++;
       keyText = typed.slice(0, i);
-      broadcast({ type: "bee_key", spellerId: botId, text: keyText });
+      const s = recordKey(botId, keyText);
+      broadcast({ type: "bee_key", spellerId: botId, text: keyText, wpm: s.wpm, accuracy: s.accuracy });
       if (i < typed.length) setTimeout(step, 160 + Math.random() * 140);
       else
         setTimeout(() => {
@@ -264,6 +290,7 @@ export function createBee(broadcast, sendTo, getPlayerIds) {
     round = 0;
     lap = 1;
     usedWords.clear(); // no repeated words within a match
+    playerStats.clear(); // reset per-player accuracy for the new match
     phase = "match";
     broadcast({ type: "bee_match_start", order: [...order], mode });
     // Short prep pause before round 1, then begin. Don't pre-synth here (it would
@@ -315,6 +342,8 @@ export function createBee(broadcast, sendTo, getPlayerIds) {
     answered = false;
     accepting = true; // never gate the speller's typing/answer
     keyText = ""; // reset the board for spectator catch-up
+    turnTypeStart = 0; // reset the WPM clock for this turn
+    prevKeyLen = 0;
     const turnRound = round;
     const turnWord = word;
     const turnSpeller = speller;
@@ -325,6 +354,7 @@ export function createBee(broadcast, sendTo, getPlayerIds) {
       round: turnRound,
       length: turnWord.length,
       tier: currentTier,
+      accuracy: matchAccuracy(turnSpeller), // cumulative match accuracy for the stats board
       alive: [...alive],
     });
     setTimeout(async () => {
@@ -444,7 +474,8 @@ export function createBee(broadcast, sendTo, getPlayerIds) {
         case "bee_key":
           if (phase === "match" && id === speller) {
             keyText = String(m.text || "").slice(0, 40);
-            broadcast({ type: "bee_key", spellerId: speller, text: keyText });
+            const s = recordKey(speller, keyText);
+            broadcast({ type: "bee_key", spellerId: speller, text: keyText, wpm: s.wpm, accuracy: s.accuracy });
           }
           break;
         case "bee_answer":

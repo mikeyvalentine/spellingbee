@@ -1,4 +1,4 @@
-import { DiscordSDK } from "@discord/embedded-app-sdk";
+import { DiscordSDK, Common } from "@discord/embedded-app-sdk";
 import type { Participant, RoomSource } from "./types";
 
 /** Discord loads the Activity in an iframe with a `frame_id` query param. */
@@ -12,6 +12,17 @@ export async function initDiscord(): Promise<RoomSource> {
 
   const sdk = new DiscordSDK(CLIENT_ID);
   await sdk.ready();
+
+  // The 3D match view is authored for a wide (landscape) frame, so lock phones
+  // to landscape. No-ops on desktop; wrapped defensively so an unsupported
+  // platform/SDK version never blocks startup.
+  try {
+    await sdk.commands.setOrientationLockState({
+      lock_state: Common.OrientationLockStateTypeObject.LANDSCAPE,
+    });
+  } catch (e) {
+    console.warn("setOrientationLockState failed:", e);
+  }
 
   // 1) Get an OAuth code from Discord. The Discord client fills in the redirect_uri
   // from the app's registered OAuth2 → Redirects, so at least one must be set there

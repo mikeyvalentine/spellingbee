@@ -421,14 +421,19 @@ export class AvatarManager {
     return true;
   }
 
-  /** Marks an avatar as host: a blue "(Host)" nametag (vs the normal yellow name). */
+  /** Show/hide an avatar's floating nametag (the speller's is hidden mid-match). */
+  setLabelVisible(id: string, visible: boolean): void {
+    const a = this.avatars.get(id);
+    if (a) a.label.visible = visible;
+  }
+
+  /** Marks an avatar as host: a blue nametag (vs the normal yellow name). */
   setHost(id: string, isHost: boolean): void {
     const a = this.avatars.get(id);
     if (!a || a.isHost === isHost) return;
     a.isHost = isHost;
     a.root.remove(a.label);
-    const text = isHost ? `(Host) ${a.name}` : a.name;
-    a.label = makeLabel(text, isHost ? "#5b8cff" : "#ffdf3b");
+    a.label = makeLabel(a.name, isHost ? "#5b8cff" : "#ffdf3b");
     a.label.position.set(0, 2.1, 0);
     a.root.add(a.label);
   }

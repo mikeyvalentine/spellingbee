@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Spelling Bee</title>
     <style>
       /* Chalkboard / keystroke font (DINAMO ABC Stefan Simple, trial). */
@@ -41,11 +41,14 @@
       }
       .lobby-card {
         width: max-content; min-width: 360px; max-width: 96vw;
-        background: var(--panel); border: 1px solid #232a38; border-radius: 16px;
-        padding: 14px 16px 14px; box-shadow: 0 12px 40px rgba(0,0,0,0.55);
+        background: rgba(40, 62, 46, 0.86); border: 1px solid rgba(244,241,232,0.12);
+        border-radius: 16px; padding: 14px 16px 14px; box-shadow: 0 12px 40px rgba(0,0,0,0.55);
       }
       .lobby-logo { font-size: 30px; line-height: 1; }
-      .lobby-title { font-size: 20px; font-weight: 800; letter-spacing: 0.5px; margin: 2px 0 10px; }
+      .lobby-title {
+        font-family: "ABC Stefan Simple", system-ui, sans-serif;
+        font-size: 28px; font-weight: 600; letter-spacing: 0.5px; margin: 2px 0 12px;
+      }
 
       .modes { display: grid; grid-template-columns: 1fr; gap: 8px; margin-bottom: 12px; }
       .mode {
@@ -114,6 +117,72 @@
       #m-timerbar { height: 100%; width: 100%; background: var(--bee); transition: width 0.05s linear; }
       #m-status { margin-top: 9px; min-height: 1.2em; font-size: 14px; }
       #m-alive { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+      /* ---------- Rotate-to-landscape nudge (touch + portrait only) ---------- */
+      #rotate-nudge {
+        position: fixed; inset: 0; z-index: 60; display: none;
+        flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+        background: #0b0d12; color: var(--ink); text-align: center; padding: 24px;
+        font: 600 18px system-ui, sans-serif;
+      }
+      #rotate-nudge .rn-icon { font-size: 52px; animation: rn-rock 1.6s ease-in-out infinite; }
+      #rotate-nudge .rn-sub { color: var(--muted); font-size: 14px; font-weight: 500; }
+      @keyframes rn-rock { 0%,100% { transform: rotate(-12deg); } 50% { transform: rotate(78deg); } }
+      @media (pointer: coarse) and (orientation: portrait) {
+        #rotate-nudge { display: flex; }
+      }
+
+      /* ---------- Slim mobile match bar (reuses #match-hud) ---------- */
+      /* On touch devices the speller has no physical keyboard, so #match-hud
+         becomes a compact bottom bar: a real editable input (raises the native
+         keyboard) + replay + timer. The verbose rows are hidden to stay minimal. */
+      #match-hud.mobile-bar {
+        width: min(640px, 96vw); padding: 8px 10px;
+        bottom: max(8px, env(safe-area-inset-bottom));
+        display: flex; align-items: center; gap: 8px; flex-wrap: nowrap;
+      }
+      #match-hud.mobile-bar #m-who,
+      #match-hud.mobile-bar #m-round,
+      #match-hud.mobile-bar #m-alive { display: none; }
+      #match-hud.mobile-bar #m-input {
+        flex: 1 1 auto; margin: 0; padding: 10px; font-size: 18px; letter-spacing: 2px;
+      }
+      #match-hud.mobile-bar #m-controls { margin: 0; flex: none; }
+      #match-hud.mobile-bar #m-replay { padding: 10px 12px; font-size: 16px; }
+      #match-hud.mobile-bar #m-timer {
+        position: absolute; left: 10px; right: 10px; bottom: 3px; margin: 0; height: 4px;
+      }
+      #match-hud.mobile-bar #m-status {
+        display: none; /* keep the bar to one row; status echoes on the 3D board */
+      }
+      /* When it's not the local player's turn, hide the input + Enter, leave replay. */
+      #match-hud.mobile-bar.no-input #m-input { display: none; }
+
+      /* ---------- Lobby responsive reflow ---------- */
+      /* Narrow widths (portrait phones, small windows): full-width card, fewer
+         roster columns, stacked tap-friendly buttons. */
+      @media (max-width: 560px) {
+        #lobby { left: 8px; right: 8px; top: 8px; }
+        .lobby-card { min-width: 0; width: auto; max-width: none; }
+        .roster { grid-template-columns: repeat(2, 1fr); gap: 6px 10px; }
+        .lobby-actions { flex-direction: column; }
+        .btn { width: 100%; padding: 14px 18px; }
+        #class-title { font-size: 18px !important; }
+      }
+      /* Short heights (landscape phones): the card must not exceed the screen —
+         scroll it, and tighten the vertical rhythm. */
+      @media (max-height: 480px) {
+        .lobby-card {
+          max-height: calc(100vh - 16px); overflow-y: auto;
+          padding: 10px 14px; -webkit-overflow-scrolling: touch;
+        }
+        .lobby-logo { font-size: 22px; }
+        .lobby-title { font-size: 22px; margin: 0 0 8px; }
+        .modes { margin-bottom: 8px; gap: 6px; }
+        .mode { padding: 8px 10px; }
+        .roster { margin-bottom: 8px; }
+        .lobby-hint { margin-top: 8px; }
+      }
     </style>
   </head>
   <body>
@@ -157,6 +226,13 @@
     </div>
 
     <div id="mode">starting…</div>
+
+    <!-- Shown only on touch devices held in portrait (match view needs landscape). -->
+    <div id="rotate-nudge">
+      <div class="rn-icon">📱</div>
+      <div>Rotate your phone</div>
+      <div class="rn-sub">Spelling Bee plays in landscape.</div>
+    </div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>
