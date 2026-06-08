@@ -107,6 +107,7 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
   let hostId = null;
   let queue = []; // join order
   let ready = new Set();
+  let settings = { mode: "basic", maxPlayers: 8 }; // host-controlled room settings
   let keyText = ""; // current speller's typed text (for catching spectators up)
 
   // ---- per-player typing stats (for the secondary stats board) ----
@@ -161,6 +162,8 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
     hostId,
     queue: [...queue],
     ready: [...ready],
+    mode: settings.mode,
+    maxPlayers: settings.maxPlayers,
   });
   const sendLobby = () => broadcast(lobbyState());
 
@@ -243,7 +246,10 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
       phase = "lobby";
       hostId = id;
     }
-    if (!queue.includes(id)) queue.push(id);
+    if (!queue.includes(id)) {
+      if (queue.length >= settings.maxPlayers) { sendTo(id, lobbyState()); return; } // room full
+      queue.push(id);
+    }
     sendLobby();
     maybeAutoStart();
   };
@@ -543,6 +549,13 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
           if (m.ready) ready.add(id);
           else ready.delete(id);
           sendLobby();
+          break;
+        case "bee_settings":
+          if (phase === "lobby" && id === hostId) {
+            if (typeof m.mode === "string") settings.mode = m.mode;
+            if (Number.isFinite(m.maxPlayers)) settings.maxPlayers = Math.max(2, Math.min(12, Math.floor(m.maxPlayers)));
+            sendLobby();
+          }
           break;
         case "bee_begin":
           startMatch(id, m.mode);

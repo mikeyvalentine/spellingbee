@@ -1,19 +1,18 @@
 import type { NetClient } from "./net";
+import type { ClipboardView } from "./clipboard";
 
 export interface GameMode {
   key: string;
   emoji: string;
   name: string;
-  desc: string;
   locked: boolean;
 }
 
-// Only "basic" is implemented for now; the rest are previewed as "soon".
 export const MODES: GameMode[] = [
-  { key: "basic", emoji: "📚", name: "Basic", desc: "Round-robin. Miss your word and you're out.", locked: false },
-  { key: "knockout", emoji: "💥", name: "Knockout", desc: "Everyone spells at once on a fast timer. Slowest is cooked.", locked: true },
-  { key: "jklm", emoji: "🔤", name: "Letter Scramble", desc: "Spell any word using the letters in the center.", locked: true },
-  { key: "theme", emoji: "🖼️", name: "Photo / Theme", desc: "“What is this?” — spell the thing you're shown.", locked: true },
+  { key: "basic", emoji: "📚", name: "Basic", locked: false },
+  { key: "knockout", emoji: "💥", name: "Knockout", locked: true },
+  { key: "jklm", emoji: "🔤", name: "Letter Scramble", locked: true },
+  { key: "theme", emoji: "🖼️", name: "Photo / Theme", locked: true },
 ];
 
 interface LobbyOpts {
@@ -21,251 +20,199 @@ interface LobbyOpts {
   localId: string;
   getName: (id: string) => string;
   isMock: boolean;
-  /** This client's home room (its Discord call, or a dev default) to return to. */
   callRoomKey: string;
+  clipboard: ClipboardView;
 }
 
 export interface LobbyController {
   onLobbyState(state: any): void;
-  /** Public-room auto-start countdown updates (bee_countdown). */
   onCountdown(m: any): void;
   show(): void;
   hide(): void;
+  frame(): void; // per render frame: position the paper panel over the 3D clipboard
   selectedMode(): string;
 }
 
+const $ = (id: string) => document.getElementById(id)!;
+
 export function setupLobby(opts: LobbyOpts): LobbyController {
-  const { net, localId, getName, isMock, callRoomKey } = opts;
-  const lobbyEl = document.getElementById("lobby")!;
-  const modesEl = document.getElementById("modes")!;
-  const rosterEl = document.getElementById("roster")!;
-  const actionsEl = document.getElementById("lobby-actions")!;
-  const hintEl = document.getElementById("lobby-hint")!;
-  const subEl = document.getElementById("lobby-sub")!;
-  const cdEl = document.getElementById("lobby-countdown")!;
+  const { net, localId, getName, isMock, callRoomKey, clipboard } = opts;
 
-  // Matchmaking overlay
-  const mmOverlay = document.getElementById("mm-overlay")!;
-  const mmList = document.getElementById("mm-list")!;
-  const mmQuick = document.getElementById("mm-quick")!;
-  const mmCreate = document.getElementById("mm-create")!;
-  const mmRefresh = document.getElementById("mm-refresh")!;
-  const mmClose = document.getElementById("mm-close")!;
+  const peekEl = $("clip-peek"), peekTextEl = $("clip-peek-text");
+  const panelEl = $("clip-panel"), closeBtn = $("clip-close");
+  const roomEl = $("cp-room"), countEl = $("cp-count"), cdEl = $("cp-cd");
+  const settingsEl = $("cp-settings"), modeSel = $("cp-mode") as HTMLSelectElement;
+  const maxEl = $("cp-max"), maxDec = $("cp-max-dec") as HTMLButtonElement, maxInc = $("cp-max-inc") as HTMLButtonElement;
+  const visEl = $("cp-vis"), rosterEl = $("cp-roster"), actionsEl = $("cp-actions");
+  const findEl = $("cp-find"), listEl = $("cp-list");
+  const quickBtn = $("cp-quick"), createBtn = $("cp-create"), refreshBtn = $("cp-refresh");
 
-  let selected = "basic";
   let lastState: any = null;
-  let inPublic = false; // true while connected to a pub:<id> room
+  let shown = false;
+  let inPublic = false;
   let publicRoomId: string | null = null;
-  let cdRaf = 0;
+  let selected = "basic";
+  let maxPlayers = 8;
+  let cdEnd = 0;
 
-  // Bottom-center "[host]'s Class" / "Public Match" label.
-  const classTitle = document.createElement("div");
-  classTitle.id = "class-title";
-  Object.assign(classTitle.style, {
-    position: "fixed", left: "50%", bottom: "20px", transform: "translateX(-50%)",
-    zIndex: "20", display: "none", color: "#f4f1e8",
-    font: "600 22px system-ui, sans-serif", textShadow: "0 2px 6px rgba(0,0,0,0.6)",
-    pointerEvents: "none", userSelect: "none",
-  } as any);
-  document.body.appendChild(classTitle);
+  const isHost = () => !!lastState && lastState.hostId === localId;
 
-  // ---- matchmaking ----
-  const api = (path: string) => fetch(path).then((r) => r.json());
-
+  // ---- matchmaking (folded into the "Find a public game" section) ----
+  const api = (p: string) => fetch(p).then((r) => r.json());
   const goToRoom = (roomKey: string, isPub: boolean, roomId: string | null) => {
     inPublic = isPub;
     publicRoomId = roomId;
-    cdEl.classList.remove("on"); // clear any stale countdown from the old room
-    cancelAnimationFrame(cdRaf);
+    cdEnd = 0;
     net.setRoom(roomKey);
-    closeMM();
   };
-
-  const quickMatch = async () => {
-    try {
-      const { roomId } = await api("/api/mm/quick");
-      if (roomId) goToRoom(`pub:${roomId}`, true, roomId);
-    } catch { /* ignore */ }
-  };
-  const createRoom = async () => {
-    try {
-      const { roomId } = await api("/api/mm/create");
-      if (roomId) goToRoom(`pub:${roomId}`, true, roomId);
-    } catch { /* ignore */ }
-  };
+  const quickMatch = async () => { try { const { roomId } = await api("/api/mm/quick"); if (roomId) goToRoom(`pub:${roomId}`, true, roomId); } catch {} };
+  const createRoom = async () => { try { const { roomId } = await api("/api/mm/create"); if (roomId) goToRoom(`pub:${roomId}`, true, roomId); } catch {} };
   const joinRoom = (roomId: string) => goToRoom(`pub:${roomId}`, true, roomId);
   const leavePublic = () => goToRoom(callRoomKey, false, null);
 
   const refreshList = async () => {
-    mmList.innerHTML = '<div class="mm-empty">Loading…</div>';
+    listEl.innerHTML = '<div class="cp-empty">Loading…</div>';
     try {
       const { rooms } = await api("/api/mm/list");
-      if (!rooms?.length) {
-        mmList.innerHTML = '<div class="mm-empty">No open rooms — quick match or create one!</div>';
-        return;
-      }
-      mmList.innerHTML = rooms
-        .map((r: any) => {
-          const full = r.players >= 6;
-          const playing = r.phase === "match";
-          const disabled = full || playing;
-          const status = playing ? "in match" : full ? "full" : "waiting";
-          return `<div class="mm-room">
-            <div>
-              <div class="mm-room-code">${r.roomId}</div>
-              <div class="mm-room-meta">${r.players}/6 · ${status}</div>
-            </div>
-            <button class="mm-join" data-room="${r.roomId}" ${disabled ? "disabled" : ""}>Join</button>
-          </div>`;
-        })
-        .join("");
-      for (const b of Array.from(mmList.querySelectorAll<HTMLElement>(".mm-join"))) {
-        b.addEventListener("click", () => joinRoom(b.dataset.room!));
-      }
-    } catch {
-      mmList.innerHTML = '<div class="mm-empty">Couldn’t load rooms.</div>';
+      if (!rooms?.length) { listEl.innerHTML = '<div class="cp-empty">No open rooms — quick match or create one!</div>'; return; }
+      listEl.innerHTML = rooms.map((r: any) => {
+        const full = r.players >= 6, playing = r.phase === "match", disabled = full || playing;
+        const status = playing ? "in match" : full ? "full" : "waiting";
+        return `<div class="cp-room"><div><div class="cp-room-code">${r.roomId}</div><div class="cp-room-meta">${r.players}/6 · ${status}</div></div>
+          <button class="cp-join" data-room="${r.roomId}" ${disabled ? "disabled" : ""}>Join</button></div>`;
+      }).join("");
+      for (const b of Array.from(listEl.querySelectorAll<HTMLElement>(".cp-join"))) b.addEventListener("click", () => joinRoom(b.dataset.room!));
+    } catch { listEl.innerHTML = '<div class="cp-empty">Couldn’t load rooms.</div>'; }
+  };
+
+  // ---- mode dropdown (Basic playable; others shown as "soon") ----
+  modeSel.innerHTML = MODES.map((m) => `<option value="${m.key}" ${m.locked ? "disabled" : ""}>${m.emoji} ${m.name}${m.locked ? " — soon" : ""}</option>`).join("");
+  modeSel.addEventListener("change", () => {
+    selected = modeSel.value;
+    if (isHost()) net.sendBee({ type: "bee_settings", mode: selected });
+  });
+  maxDec.addEventListener("click", () => { if (isHost()) net.sendBee({ type: "bee_settings", maxPlayers: Math.max(2, maxPlayers - 1) }); });
+  maxInc.addEventListener("click", () => { if (isHost()) net.sendBee({ type: "bee_settings", maxPlayers: Math.min(12, maxPlayers + 1) }); });
+  for (const b of Array.from(visEl.querySelectorAll<HTMLElement>("button"))) {
+    b.addEventListener("click", () => {
+      const v = b.dataset.v;
+      if (v === "public" && !inPublic) createRoom(); // go public: spin up a matchmade room you host
+      else if (v === "private" && inPublic) leavePublic(); // back to your call's private room
+    });
+  }
+  quickBtn.addEventListener("click", quickMatch);
+  createBtn.addEventListener("click", createRoom);
+  refreshBtn.addEventListener("click", refreshList);
+
+  // ---- open / close the clipboard ----
+  const ndcOf = (e: PointerEvent) => [(e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1] as const;
+  peekEl.addEventListener("click", () => clipboard.focus());
+  closeBtn.addEventListener("click", () => clipboard.blur());
+  window.addEventListener("pointermove", (e) => {
+    if (!shown || clipboard.isFocused()) { clipboard.setHover(false); return; }
+    const [x, y] = ndcOf(e);
+    clipboard.setHover(clipboard.hitTest(x, y));
+  });
+  window.addEventListener("pointerdown", (e) => {
+    if (!shown) return;
+    const t = e.target as HTMLElement;
+    const onUi = t.closest && (t.closest("#clip-panel") || t.closest("#clip-peek"));
+    const [x, y] = ndcOf(e);
+    const onClip = clipboard.hitTest(x, y);
+    if (clipboard.isFocused()) {
+      if (!onUi && !onClip) clipboard.blur(); // click away closes
+    } else if (onClip) {
+      clipboard.focus(); // click the 3D clipboard to open
     }
-  };
-
-  const openMM = () => {
-    mmOverlay.classList.add("on");
-    refreshList();
-  };
-  const closeMM = () => mmOverlay.classList.remove("on");
-
-  mmQuick.addEventListener("click", quickMatch);
-  mmCreate.addEventListener("click", createRoom);
-  mmRefresh.addEventListener("click", refreshList);
-  mmClose.addEventListener("click", closeMM);
-  mmOverlay.addEventListener("click", (e) => {
-    if (e.target === mmOverlay) closeMM(); // click backdrop to dismiss
   });
 
-  // ---- auto-start countdown (public rooms) ----
-  const onCountdown = (m: any) => {
-    cancelAnimationFrame(cdRaf);
-    if (m.cancelled || !m.ms) {
-      cdEl.classList.remove("on");
-      return;
-    }
-    const end = Date.now() + m.ms;
-    cdEl.classList.add("on");
-    const tick = () => {
-      const left = Math.max(0, end - Date.now());
-      cdEl.innerHTML = `<div class="cd-num">${Math.ceil(left / 1000)}</div><div class="cd-label">match starting…</div>`;
-      if (left > 0) cdRaf = requestAnimationFrame(tick);
-      else cdEl.classList.remove("on");
-    };
-    tick();
-  };
-
-  // ---- mode cards ----
-  const visibleModes = MODES.filter((m) => !m.locked);
-  const renderModes = () => {
-    modesEl.innerHTML = visibleModes
-      .map(
-        (m) => `
-      <div class="mode ${m.locked ? "locked" : ""} ${m.key === selected ? "selected" : ""}" data-mode="${m.key}">
-        ${m.locked ? '<div class="m-soon">SOON</div>' : ""}
-        <div class="m-name">${m.emoji} ${m.name}</div>
-        <div class="m-desc">${m.desc}</div>
-      </div>`
-      ).join("");
-    for (const el of Array.from(modesEl.querySelectorAll<HTMLElement>(".mode"))) {
-      el.addEventListener("click", () => {
-        const key = el.dataset.mode!;
-        const mode = MODES.find((m) => m.key === key);
-        if (!mode || mode.locked) return;
-        selected = key;
-        renderModes();
-      });
-    }
-  };
-
-  // ---- roster + actions ----
+  // ---- render the paper content ----
   const render = (s: any) => {
     lastState = s;
     const queue: string[] = s.queue ?? [];
     const ready: string[] = s.ready ?? [];
-    const isHost = s.hostId === localId;
+    const host = s.hostId === localId;
     const inQueue = queue.includes(localId);
     const amReady = ready.includes(localId);
+    maxPlayers = s.maxPlayers ?? maxPlayers;
+    if (s.mode) { selected = s.mode; if (modeSel.value !== selected) modeSel.value = selected; }
 
-    if (inPublic) {
-      subEl.innerHTML = `Public room <span class="code">${publicRoomId ?? ""}</span> · ${queue.length} player${queue.length === 1 ? "" : "s"}`;
-      classTitle.textContent = "Public Match";
-    } else {
-      subEl.textContent = "";
-      classTitle.textContent = s.hostId ? `${getName(s.hostId)}'s Class` : "";
+    const roomName = inPublic ? `Public room ${publicRoomId ?? ""}` : s.hostId ? `${getName(s.hostId)}'s Class` : "Lobby";
+    roomEl.textContent = roomName;
+    countEl.textContent = `${queue.length}/${maxPlayers}`;
+    peekTextEl.textContent = `${roomName} · ${queue.length}/${maxPlayers}`;
+
+    // Room settings + Find-a-game only apply to your own (private) room.
+    settingsEl.style.display = inPublic ? "none" : "";
+    findEl.style.display = inPublic ? "none" : "";
+    modeSel.disabled = !host;
+    maxEl.textContent = String(maxPlayers);
+    maxDec.disabled = !host; maxInc.disabled = !host;
+    for (const b of Array.from(visEl.querySelectorAll<HTMLElement>("button"))) {
+      const on = (b.dataset.v === "public") === inPublic;
+      b.classList.toggle("on", on);
     }
 
-    // Public rooms have no ready/host system — show a neutral marker instead of ticks.
-    rosterEl.innerHTML =
-      queue.length === 0
-        ? '<div class="roster-empty">Waiting for players…</div>'
-        : queue
-            .map((id) => {
-              const tick = inPublic ? "•" : ready.includes(id) ? "✅" : "⬜";
-              const you = id === localId ? " (you)" : "";
-              const isHostRow = !inPublic && id === s.hostId;
-              const name = `${getName(id)}${you}`;
-              return `<div class="roster-row"><span class="tick">${tick}</span><span class="roster-name${isHostRow ? " host" : ""}">${name}</span></div>`;
-            })
-            .join("");
+    rosterEl.innerHTML = queue.length === 0
+      ? '<div class="cp-empty">Waiting for players…</div>'
+      : queue.map((id) => {
+          const tick = inPublic ? "•" : ready.includes(id) ? "✅" : "⬜";
+          const you = id === localId ? " (you)" : "";
+          const isH = !inPublic && id === s.hostId;
+          return `<div class="cp-prow"><span class="cp-tick">${tick}</span><span class="cp-name${isH ? " host" : ""}">${getName(id)}${you}</span></div>`;
+        }).join("");
 
     const btns: string[] = [];
     if (inPublic) {
-      btns.push(`<button class="btn secondary" id="lb-leave">← Leave room</button>`);
+      btns.push(`<button class="cpb sec" id="cp-leave">← Leave room</button>`);
     } else {
-      if (inQueue) {
-        btns.push(`<button class="btn secondary" id="lb-ready">${amReady ? "Unready" : "Ready"}</button>`);
-      } else {
-        btns.push(`<button class="btn" id="lb-join">Join</button>`);
-      }
-      if (isHost) btns.push(`<button class="btn" id="lb-start">Start match</button>`);
-      if (inQueue && !isHost) btns.push(`<button class="btn secondary" id="lb-host">Become host</button>`);
-      if (isMock || isHost) btns.push(`<button class="btn secondary" id="lb-bots">+ Add bots</button>`);
-      btns.push(`<button class="btn" id="lb-public">🌐 Play public</button>`);
+      if (inQueue) btns.push(`<button class="cpb sec" id="cp-ready">${amReady ? "Unready" : "Ready"}</button>`);
+      else btns.push(`<button class="cpb" id="cp-join">Join</button>`);
+      if (host) btns.push(`<button class="cpb" id="cp-start">Start match</button>`);
+      if (inQueue && !host) btns.push(`<button class="cpb sec" id="cp-claimhost">Become host</button>`);
+      if (isMock || host) btns.push(`<button class="cpb sec" id="cp-bots">+ Bots</button>`);
     }
     actionsEl.innerHTML = btns.join("");
-
-    document.getElementById("lb-public")?.addEventListener("click", openMM);
-    document.getElementById("lb-leave")?.addEventListener("click", leavePublic);
-    document.getElementById("lb-host")?.addEventListener("click", () => net.sendBee({ type: "bee_claimhost" }));
-    document.getElementById("lb-ready")?.addEventListener("click", () => net.sendBee({ type: "bee_ready", ready: !amReady }));
-    document.getElementById("lb-join")?.addEventListener("click", () => net.sendBee({ type: "bee_join" }));
-    document.getElementById("lb-start")?.addEventListener("click", () => net.sendBee({ type: "bee_begin", mode: selected }));
-    document.getElementById("lb-bots")?.addEventListener("click", () => net.sendBee({ type: "bee_addbots", n: 4 }));
-
-    // Modes only matter for the host-started private flow.
-    modesEl.style.display = inPublic ? "none" : "";
-
-    if (inPublic) {
-      hintEl.textContent = queue.length < 2 ? "Waiting for another player to join…" : "";
-    } else {
-      hintEl.textContent = isHost ? "" : "Waiting for the host to start the match.";
-    }
+    $("cp-leave")?.addEventListener("click", leavePublic);
+    $("cp-ready")?.addEventListener("click", () => net.sendBee({ type: "bee_ready", ready: !amReady }));
+    $("cp-join")?.addEventListener("click", () => net.sendBee({ type: "bee_join" }));
+    $("cp-start")?.addEventListener("click", () => net.sendBee({ type: "bee_begin", mode: selected }));
+    $("cp-claimhost")?.addEventListener("click", () => net.sendBee({ type: "bee_claimhost" }));
+    $("cp-bots")?.addEventListener("click", () => net.sendBee({ type: "bee_addbots", n: 4 }));
   };
 
-  renderModes();
-
   return {
-    onLobbyState(state) {
-      render(state);
-    },
-    onCountdown(m) {
-      onCountdown(m);
-    },
+    onLobbyState(state) { render(state); },
+    onCountdown(m) { cdEnd = m.cancelled || !m.ms ? 0 : Date.now() + m.ms; },
     show() {
-      lobbyEl.style.display = "flex";
-      classTitle.style.display = "block";
+      shown = true;
+      clipboard.setVisible(true);
       if (lastState) render(lastState);
     },
     hide() {
-      lobbyEl.style.display = "none";
-      classTitle.style.display = "none";
-      cdEl.classList.remove("on");
-      cancelAnimationFrame(cdRaf);
+      shown = false;
+      clipboard.setVisible(false);
+      panelEl.classList.remove("show");
+      peekEl.classList.remove("show");
+    },
+    frame() {
+      if (!shown) { panelEl.classList.remove("show"); peekEl.classList.remove("show"); return; }
+      const r = clipboard.isFocused() ? clipboard.paperRect() : null;
+      if (r) {
+        panelEl.style.left = `${Math.round(r.x)}px`;
+        panelEl.style.top = `${Math.round(r.y - 28)}px`;
+        panelEl.style.width = `${Math.round(r.w)}px`;
+        panelEl.style.height = `${Math.round(r.h + 28)}px`;
+        panelEl.classList.add("show");
+      } else {
+        panelEl.classList.remove("show");
+      }
+      peekEl.classList.toggle("show", !clipboard.isFocused());
+      if (cdEnd) {
+        const left = Math.max(0, cdEnd - Date.now());
+        cdEl.textContent = left > 0 ? `· starting in ${Math.ceil(left / 1000)}s` : "";
+        if (left <= 0) cdEnd = 0;
+      } else if (cdEl.textContent) cdEl.textContent = "";
     },
     selectedMode: () => selected,
   };

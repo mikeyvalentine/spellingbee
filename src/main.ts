@@ -4,6 +4,7 @@ import { loadClassroom } from "./classroom";
 import { connectNet } from "./net";
 import { setupLobby } from "./lobby";
 import { setupBee } from "./bee";
+import { makeClipboard } from "./clipboard";
 import type { RoomSource, Participant } from "./types";
 
 const CHARACTER_URLS = [
@@ -24,6 +25,8 @@ const isInDiscord = () => new URLSearchParams(window.location.search).has("frame
 async function main(): Promise<void> {
   const { scene, camera, renderer, clock } = setupScene();
   const avatars = new AvatarManager(scene);
+  const clipboard = makeClipboard(camera); // 3D lobby clipboard (placeholder mesh)
+  scene.add(clipboard.group);
   const modeEl = document.getElementById("mode")!;
   const inDiscord = isInDiscord();
   modeEl.textContent = inDiscord ? "Discord mode" : "Mock mode (local dev)";
@@ -64,7 +67,7 @@ async function main(): Promise<void> {
   net.onLeave((id) => avatars.removePlayer(id));
 
   // The lobby is 2D DOM — show it now, over the (still-loading) 3D scene.
-  const lobby = setupLobby({ net, localId, getName, isMock: !inDiscord, callRoomKey: source.roomKey });
+  const lobby = setupLobby({ net, localId, getName, isMock: !inDiscord, callRoomKey: source.roomKey, clipboard });
   lobby.show();
 
   // The 3D match stage needs the classroom; until it's built, buffer bee messages.
@@ -115,6 +118,8 @@ async function main(): Promise<void> {
     if (document.hidden) return;
     const dt = Math.min(clock.getDelta(), 0.05);
     if (match) match.update(); // drives the lobby/match camera + speller
+    clipboard.update(dt); // anchor + animate the lobby clipboard (after the camera is set)
+    lobby.frame(); // position the paper panel over the clipboard
     avatars.update(dt);
     renderer.render(scene, camera);
   });

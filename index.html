@@ -225,6 +225,73 @@
       @keyframes tomato-pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }
       @media (max-height: 480px) { #tomato-btn { width: 52px; height: 52px; bottom: 74px; } }
 
+      /* ---------- Clipboard lobby (3D prop + HTML "paper" controls) ---------- */
+      #clip-peek {
+        position: fixed; left: 50%; bottom: 0; transform: translateX(-50%);
+        z-index: 20; display: none; cursor: pointer; user-select: none;
+        background: rgba(40,62,46,0.92); color: #f4f1e8;
+        border: 1px solid rgba(244,241,232,0.16); border-bottom: 0;
+        border-radius: 12px 12px 0 0; padding: 10px 22px 14px;
+        font: 700 15px system-ui, sans-serif; box-shadow: 0 -6px 24px rgba(0,0,0,0.45);
+        transition: transform 0.16s ease; white-space: nowrap;
+      }
+      #clip-peek.show { display: block; }
+      #clip-peek:hover { transform: translateX(-50%) translateY(-5px); }
+      #clip-peek .cp-peek-hint { color: var(--muted); font-weight: 500; font-size: 12px; margin-left: 10px; }
+
+      #clip-panel { position: fixed; z-index: 21; display: none; flex-direction: column; }
+      #clip-panel.show { display: flex; }
+      #clip-close {
+        align-self: center; width: 56px; height: 22px; border: 0; margin-bottom: 6px;
+        border-radius: 0 0 11px 11px; background: rgba(18,22,18,0.9); color: #f4f1e8;
+        cursor: pointer; font-size: 12px;
+      }
+      #clip-paper {
+        flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+        background: #f4efe2; color: #2a2620; border-radius: 7px;
+        padding: 16px 20px 20px; box-shadow: 0 18px 50px rgba(0,0,0,0.55);
+        font-family: system-ui, sans-serif;
+      }
+      .cp-header { font: 800 20px system-ui, sans-serif; margin-bottom: 12px; }
+      .cp-header .cp-count { color: #6a6256; font-weight: 600; font-size: 14px; }
+      .cp-cd { color: #b8860b; font-weight: 700; font-size: 13px; margin-left: 8px; }
+      .cp-section { border-top: 1px solid #d9d2c2; padding: 12px 0; }
+      .cp-label { font: 700 12px system-ui, sans-serif; text-transform: uppercase; letter-spacing: 0.5px; color: #8a8170; margin-bottom: 8px; }
+      .cp-srow { display: flex; align-items: center; justify-content: space-between; margin: 7px 0; gap: 10px; }
+      .cp-srow > label { font-weight: 600; font-size: 14px; }
+      .cp-srow select, .cp-srow .cp-stepper, .cp-srow .cp-toggle { font-size: 14px; }
+      .cp-srow select { padding: 6px 8px; border-radius: 8px; border: 1px solid #c9c1b0; background: #fff; color: #2a2620; }
+      .cp-srow select:disabled { opacity: 0.7; }
+      .cp-stepper { display: inline-flex; align-items: center; gap: 4px; }
+      .cp-stepper button { width: 28px; height: 28px; border: 1px solid #c9c1b0; background: #fff; border-radius: 7px; cursor: pointer; font-weight: 700; }
+      .cp-stepper button:disabled { opacity: 0.4; cursor: not-allowed; }
+      .cp-stepper span { min-width: 22px; text-align: center; font-weight: 700; }
+      .cp-toggle { display: inline-flex; border: 1px solid #c9c1b0; border-radius: 8px; overflow: hidden; }
+      .cp-toggle button { border: 0; background: #fff; color: #2a2620; padding: 6px 12px; cursor: pointer; font-weight: 600; }
+      .cp-toggle button.on { background: var(--bee); color: #2a2010; }
+      .cp-toggle button:disabled { cursor: not-allowed; }
+      .cp-roster { display: flex; flex-direction: column; gap: 4px; }
+      .cp-prow { display: flex; align-items: center; gap: 7px; font-size: 14px; }
+      .cp-prow .cp-tick { width: 16px; }
+      .cp-prow .cp-name.host { color: #2a6df0; font-weight: 800; }
+      .cp-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 12px; }
+      .cp-actions .cpb {
+        font: 700 14px system-ui, sans-serif; border: 0; border-radius: 9px;
+        padding: 11px 16px; cursor: pointer; color: #2a2010; background: var(--bee); flex: 1 1 auto;
+      }
+      .cp-actions .cpb.sec { background: #e3ddcd; color: #2a2620; }
+      .cp-actions .cpb:hover { filter: brightness(1.04); }
+      .cp-find-actions { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+      .cp-find-actions .cpb { flex: 1; }
+      .cp-refresh { background: none; border: 0; color: #2a6df0; font-size: 13px; cursor: pointer; }
+      .cp-list { display: flex; flex-direction: column; gap: 6px; }
+      .cp-room { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: #fff; border: 1px solid #ddd5c4; border-radius: 9px; padding: 8px 11px; }
+      .cp-room .cp-room-code { font-weight: 800; letter-spacing: 1px; }
+      .cp-room .cp-room-meta { color: #8a8170; font-size: 12px; }
+      .cp-room .cp-join { border: 0; border-radius: 7px; padding: 6px 12px; background: var(--bee); color: #2a2010; font-weight: 700; cursor: pointer; }
+      .cp-room .cp-join:disabled { opacity: 0.45; cursor: not-allowed; }
+      .cp-empty { color: #8a8170; font-style: italic; font-size: 13px; text-align: center; padding: 8px 0; }
+
       /* ---------- Rotate-to-landscape nudge (touch + portrait only) ---------- */
       #rotate-nudge {
         position: fixed; inset: 0; z-index: 60; display: none;
@@ -396,6 +463,43 @@
       <div id="m-timer"><div id="m-timerbar"></div></div>
       <div id="m-status"></div>
       <div id="m-alive"></div>
+    </div>
+
+    <!-- Clipboard lobby: peek strip (bottom) + paper panel (overlays the 3D paper) -->
+    <div id="clip-peek"><span id="clip-peek-text">Lobby</span><span class="cp-peek-hint">click to open</span></div>
+    <div id="clip-panel">
+      <button id="clip-close" title="Close">▾ close</button>
+      <div id="clip-paper">
+        <div class="cp-header"><span id="cp-room">Lobby</span> <span class="cp-count" id="cp-count"></span><span class="cp-cd" id="cp-cd"></span></div>
+
+        <div class="cp-section" id="cp-settings">
+          <div class="cp-label">Room settings</div>
+          <div class="cp-srow"><label>Game mode</label><select id="cp-mode"></select></div>
+          <div class="cp-srow"><label>Max players</label>
+            <div class="cp-stepper"><button id="cp-max-dec">−</button><span id="cp-max">8</span><button id="cp-max-inc">+</button></div>
+          </div>
+          <div class="cp-srow"><label>Room</label>
+            <div class="cp-toggle" id="cp-vis"><button data-v="private">Private</button><button data-v="public">Public</button></div>
+          </div>
+        </div>
+
+        <div class="cp-section">
+          <div class="cp-label">Players</div>
+          <div id="cp-roster" class="cp-roster"></div>
+        </div>
+
+        <div class="cp-actions" id="cp-actions"></div>
+
+        <div class="cp-section" id="cp-find">
+          <div class="cp-label">Find a public game</div>
+          <div class="cp-find-actions">
+            <button class="cpb" id="cp-quick">⚡ Quick Match</button>
+            <button class="cpb sec" id="cp-create">＋ Create</button>
+            <button class="cp-refresh" id="cp-refresh">↻ Refresh</button>
+          </div>
+          <div id="cp-list" class="cp-list"></div>
+        </div>
+      </div>
     </div>
 
     <!-- Top-right universal menu (always visible) -->
