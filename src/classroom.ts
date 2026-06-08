@@ -51,6 +51,8 @@ export interface RoomLights {
   front: THREE.PointLight;
   back?: THREE.PointLight;
   window?: THREE.RectAreaLight | THREE.PointLight; // PointLight on mobile (cheap)
+  spot?: THREE.SpotLight; // warm stage spotlight on the active speller (vibe pass)
+  accents?: THREE.Light[]; // extra colored/fill accent lights (vibe pass)
 }
 
 export interface Classroom {
@@ -246,17 +248,19 @@ function buildLights(root: THREE.Object3D, objs: Map<string, THREE.Object3D>): R
   // Two warm ceiling point lights, derived from the ceiling's bounds (the GLB
   // exports no punctual light data). Front one (over the speller) casts shadow.
   const ceiling = objs.get("ceiling");
-  let pf = new THREE.Vector3(0.5, 5.4, 4);
-  let pb = new THREE.Vector3(0.5, 5.4, -2);
+  // Room bounds (from the ceiling mesh) place every light below; the fallbacks
+  // cover a missing ceiling marker.
+  let cx = 0.5, ceilY = 5.4, minX = -5, maxX = 6, minZ = -3, maxZ = 9;
   if (ceiling) {
     const b = new THREE.Box3().setFromObject(ceiling);
-    const y = b.max.y - 0.5;
-    const cx = (b.min.x + b.max.x) / 2;
-    pf = new THREE.Vector3(cx, y, THREE.MathUtils.lerp(b.min.z, b.max.z, 0.72));
-    pb = new THREE.Vector3(cx, y, THREE.MathUtils.lerp(b.min.z, b.max.z, 0.28));
+    ceilY = b.max.y - 0.5;
+    cx = (b.min.x + b.max.x) / 2;
+    minX = b.min.x; maxX = b.max.x; minZ = b.min.z; maxZ = b.max.z;
   }
+  const pf = new THREE.Vector3(cx, ceilY, THREE.MathUtils.lerp(minZ, maxZ, 0.72));
+  const pb = new THREE.Vector3(cx, ceilY, THREE.MathUtils.lerp(minZ, maxZ, 0.28));
 
-  const front = new THREE.PointLight(0xffe6bc, 26, 10, 1.55); // tuned via debug
+  const front = new THREE.PointLight(0xffd9a3, 20, 10, 1.55); // amber, dimmed — golden-hour re-skin (was 0xffe6bc, 26)
   front.position.copy(pf);
   front.castShadow = true;
   front.shadow.mapSize.set(512, 512);
@@ -265,7 +269,7 @@ function buildLights(root: THREE.Object3D, objs: Map<string, THREE.Object3D>): R
   front.shadow.bias = -0.0006;
   root.add(front);
 
-  const back = new THREE.PointLight(0xffe6bc, 16, 4, 1.6); // tuned via debug
+  const back = new THREE.PointLight(0xffd9a3, 11, 4, 1.6); // amber, dimmed — golden-hour re-skin (was 0xffe6bc, 16)
   back.position.copy(pb);
   root.add(back);
 
@@ -276,7 +280,52 @@ function buildLights(root: THREE.Object3D, objs: Map<string, THREE.Object3D>): R
   const win = buildWindowLight(objs.get("doorwindowarealight"), isMobile);
   root.add(win);
 
-  return { front, back, window: win };
+  // --- Vibe pass: extra accent lights for a moodier, more "lit" room. --------
+  // Desktop only — each is an extra forward light (and the spot a 2nd shadow
+  // pass); mobile already runs a lean lighting/shadow profile, so the accents
+  // would tank it. The warm color re-skin (front/back/window/exposure/bg) still
+  // applies on mobile. All tunable; intensities assume ACES + ~0.95 exposure.
+  let spot: THREE.SpotLight | undefined;
+  const accents: THREE.Light[] = [];
+  if (!isMobile) {
+    // Hero spotlight: a warm "stage" cone on the active speller, who always
+    // stands at SPELLER_POS. Gives the bee an on-stage feel; casts a soft shadow.
+    spot = new THREE.SpotLight(0xffe1b0, 80, 16, Math.PI / 5, 0.55, 1.3);
+    spot.position.set(SPELLER_POS.x + 0.3, ceilY - 0.5, SPELLER_POS.z + 1.2);
+    spot.target.position.copy(SPELLER_POS);
+    spot.castShadow = true;
+    spot.shadow.mapSize.set(1024, 1024);
+    spot.shadow.bias = -0.0006;
+    root.add(spot);
+    root.add(spot.target);
+
+    // Cool counter-fill from high on the window wall. The warm/cool contrast is
+    // what makes the room read "moody" instead of flat.
+    const coolFill = new THREE.PointLight(0x5b7dff, 8, 18, 1.4);
+    coolFill.position.set(minX + 0.6, ceilY - 0.8, THREE.MathUtils.lerp(minZ, maxZ, 0.45));
+    root.add(coolFill);
+    accents.push(coolFill);
+
+    // Soft warm wash on the chalkboard wall so the board pops — an even glow.
+    const boardGlow = new THREE.PointLight(0xffb877, 6, 12, 1.4);
+    boardGlow.position.set(cx, 4.0, maxZ - 1.6);
+    root.add(boardGlow);
+    accents.push(boardGlow);
+
+    // Two dim, saturated color accents in the back corners — a subtle wash of
+    // color around the room (kept low so it reads as ambiance, not a disco).
+    const magenta = new THREE.PointLight(0xb14bff, 5, 10, 1.8);
+    magenta.position.set(minX + 1.0, 1.6, minZ + 1.0);
+    root.add(magenta);
+    accents.push(magenta);
+
+    const teal = new THREE.PointLight(0x18d3c8, 4.5, 10, 1.8);
+    teal.position.set(maxX - 1.0, 1.6, minZ + 1.0);
+    root.add(teal);
+    accents.push(teal);
+  }
+
+  return { front, back, window: win, spot, accents };
 }
 
 function buildWindowLight(plane: THREE.Object3D | undefined, isMobile: boolean): THREE.RectAreaLight | THREE.PointLight {
@@ -307,12 +356,13 @@ function buildWindowLight(plane: THREE.Object3D | undefined, isMobile: boolean):
   }
 
   if (isMobile) {
-    // Cheap stand-in: a warm PointLight just inside the window plane.
-    const pl = new THREE.PointLight(0xe9e2d2, 13, 12, 1.6);
+    // Cheap stand-in: a warm PointLight just inside the window plane (golden-hour
+    // re-skin: low warm sunset, matching the desktop RectAreaLight).
+    const pl = new THREE.PointLight(0xffb070, 7, 12, 1.6);
     pl.position.copy(center).add(normal.clone().multiplyScalar(0.3));
     return pl;
   }
-  const light = new THREE.RectAreaLight(0xe9e2d2, 7.5, width, height); // tuned via debug (warm)
+  const light = new THREE.RectAreaLight(0xffb070, 4.0, width, height); // low warm sunset — golden-hour re-skin (was 0xe9e2d2, 7.5)
   light.position.copy(center);
   light.lookAt(center.clone().add(normal)); // -Z faces the normal → into the room
   return light;
