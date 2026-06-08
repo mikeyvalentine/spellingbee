@@ -131,7 +131,9 @@ export function makeClipboard(camera: THREE.PerspectiveCamera): ClipboardView {
   };
 
   const paperRect = () => {
-    if (!visible || t < 0.992) return null; // only once essentially settled (no width reflow)
+    // Mount a bit before fully settled (the wider paper keeps text from wrapping);
+    // the panel's CSS opacity transition fades it in so it doesn't pop.
+    if (!visible || t < 0.93) return null;
     paper.updateWorldMatrix(true, false);
     camera.updateMatrixWorld();
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
