@@ -206,6 +206,41 @@ export function setupBee(opts: BeeOpts): BeeStage {
   } as any);
   document.body.appendChild(chalkTip);
 
+  // ---- toolbar: a small rounded backing panel (camera-anchored) that the corner
+  // power-ups sit inside, so they read as a little tool tray in the lower-right. ----
+  const toolbar = (() => {
+    const c = document.createElement("canvas");
+    c.width = 320; c.height = 184;
+    const x = c.getContext("2d")!;
+    const pad = 6, r = 40, w = c.width, h = c.height;
+    const rr = () => {
+      x.beginPath();
+      x.moveTo(pad + r, pad);
+      x.arcTo(w - pad, pad, w - pad, h - pad, r);
+      x.arcTo(w - pad, h - pad, pad, h - pad, r);
+      x.arcTo(pad, h - pad, pad, pad, r);
+      x.arcTo(pad, pad, w - pad, pad, r);
+      x.closePath();
+    };
+    x.fillStyle = "rgba(14,17,24,0.5)"; rr(); x.fill();
+    x.lineWidth = 4; x.strokeStyle = "rgba(255,255,255,0.10)"; rr(); x.stroke();
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.62, 0.36),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false })
+    );
+    mesh.renderOrder = 997; // behind the items (998)
+    mesh.matrixAutoUpdate = false;
+    mesh.visible = false;
+    scene.add(mesh);
+    return mesh;
+  })();
+  const TOOLBAR_POS = new THREE.Vector3(0.645, -0.52, -1.37); // just behind the items' plane
+  const toolbarMat = new THREE.Matrix4();
+  const toolbarQ = new THREE.Quaternion();
+  const toolbarScl = new THREE.Vector3(1, 1, 1);
+
   // Each power-up is on-screen for any in-match participant who still has it, and
   // shows the shared "cannot be used" disabled state when its own availability
   // rule isn't met. Tomato: usable only on OTHER players' turns (you can't tomato
@@ -874,6 +909,14 @@ export function setupBee(opts: BeeOpts): BeeStage {
     update: (dt: number) => {
       applyCamera(phase === "match" ? classroom.matchCam : classroom.lobbyCam);
       applyCameraLife(dt); // breathing bob (match) + cursor parallax (both)
+      // Toolbar tray behind the items (shown whenever a power-up is on-screen).
+      toolbar.visible = tomatoVisible() || chalkVisible();
+      if (toolbar.visible) {
+        camera.updateMatrixWorld();
+        toolbarMat.compose(TOOLBAR_POS, toolbarQ, toolbarScl);
+        toolbar.matrix.multiplyMatrices(camera.matrixWorld, toolbarMat);
+        toolbar.matrixWorldNeedsUpdate = true;
+      }
       tomato.update(dt); // anchor + spin the corner tomato; advance any flights
       chalk.update(dt); // anchor + spin the corner golden chalk
 

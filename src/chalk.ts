@@ -22,13 +22,13 @@ const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const TILT_DIR = new THREE.Vector3(0.30, 1, 0.06).normalize();
 const SPIN_SPEED = 0.17; // rad/s (slow)
 const HOVER_SCALE = 0.14;
-// With bloom threshold ≈1.36, the emissive must sit just above it for a SUBTLE
-// rim glow (the low bloom strength/radius keep the halo small) — not the blown
-// blob a high emissive produced. Tunable alongside the bloom debug sliders.
-const BASE_GLOW = 1.55; // resting emissive (active)
-const HOVER_GLOW = 0.4; // extra emissive on hover
+// A soft self-lit yellow — NOT bright enough to bloom hard (the bloom threshold
+// is ~1.36; a yellow this dim stays well under it, so it reads as warm chalk
+// rather than a blown-white blob).
+const BASE_GLOW = 0.5; // resting emissive (active) — subtle
+const HOVER_GLOW = 0.3; // extra emissive on hover
 
-const GOLD = 0xfff7df; // soft yellow-white when available
+const GOLD = 0xf4c531; // warm yellow when available
 const GREY = 0x44444a; // dark grey when "not your turn"
 
 function buildChalk(): THREE.Group {
@@ -55,7 +55,7 @@ export function makeChalk(camera: THREE.PerspectiveCamera, scene: THREE.Scene): 
   const spinQ = new THREE.Quaternion();
 
   const pu = makePowerup({
-    camera, scene, spinner, materials: [bodyMat],
+    camera, scene, spinner,
     idlePos: IDLE.pos, scale: IDLE.scale, spinSpeed: SPIN_SPEED,
     applySpin: (s, a) => { spinQ.setFromAxisAngle(Y_AXIS, a); s.quaternion.copy(tiltQ).multiply(spinQ); },
     hoverScale: HOVER_SCALE,

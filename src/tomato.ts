@@ -61,15 +61,7 @@ function buildTomato(): THREE.Group {
   return g;
 }
 
-const collectMaterials = (g: THREE.Object3D): THREE.Material[] => {
-  const set = new Set<THREE.Material>();
-  g.traverse((o) => {
-    const m = (o as THREE.Mesh).material;
-    if (Array.isArray(m)) m.forEach((x) => set.add(x));
-    else if (m) set.add(m);
-  });
-  return [...set];
-};
+const RED = new THREE.Color(0xd62b1f), DISABLED = new THREE.Color(0x5a5a5e); // grey when "not your turn"
 
 interface Flight {
   mesh: THREE.Group;
@@ -87,11 +79,15 @@ export function makeTomato(camera: THREE.PerspectiveCamera, scene: THREE.Scene):
   const bodyMat = (spinner.getObjectByName("tomatoBody") as THREE.Mesh).material as THREE.MeshStandardMaterial;
 
   const pu = makePowerup({
-    camera, scene, spinner, materials: collectMaterials(spinner),
+    camera, scene, spinner,
     idlePos: IDLE.pos, scale: IDLE.scale, spinSpeed: SPIN_SPEED,
     applySpin: (s, a) => s.quaternion.setFromAxisAngle(SPIN_AXIS, a),
     hoverScale: HOVER_SCALE,
-    applyState: (_active, hover) => { bodyMat.emissiveIntensity = HOVER_GLOW * hover; },
+    applyState: (active, hover) => {
+      bodyMat.color.copy(DISABLED).lerp(RED, active); // grey when disabled, red when usable
+      bodyMat.emissive.copy(RED);
+      bodyMat.emissiveIntensity = HOVER_GLOW * hover;
+    },
   });
 
   const flights: Flight[] = [];
