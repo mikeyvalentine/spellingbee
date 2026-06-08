@@ -2,12 +2,14 @@ import * as THREE from "three";
 import type { NetClient } from "./net";
 import type { AvatarManager } from "./avatars";
 import type { Classroom, CameraPose } from "./classroom";
+import { makeTomato } from "./tomato";
 
 interface BeeOpts {
   net: NetClient;
   localId: string;
   getName: (id: string) => string;
   camera: THREE.PerspectiveCamera;
+  scene: THREE.Scene; // tomato flights live in the scene
   avatars: AvatarManager;
   classroom: Classroom;
   callRoomKey: string; // this client's home room, to return to on "leave match"
@@ -15,7 +17,7 @@ interface BeeOpts {
 }
 
 export interface BeeStage {
-  update(): void; // per-frame: drive the render camera + live speller transform
+  update(dt: number): void; // per-frame: drive the render camera + speller + tomato
   handle(m: any): void;
 }
 
@@ -54,7 +56,7 @@ const tierColor = (t: string) =>
   t === "easy" ? "#f4f1e8" : t === "medium" ? "#ffd23b" : "#ff6b6b";
 
 export function setupBee(opts: BeeOpts): BeeStage {
-  const { net, localId, getName, camera, avatars, classroom, callRoomKey } = opts;
+  const { net, localId, getName, camera, scene, avatars, classroom, callRoomKey } = opts;
   const debug = !!opts.debug;
 
   // ---------- HUD elements ----------
@@ -138,26 +140,58 @@ export function setupBee(opts: BeeOpts): BeeStage {
   boardCheck.addEventListener("click", () => submit());
   document.body.appendChild(boardCheck);
 
-  // ---- tomato power-up ----
-  // Available to active (alive, non-speller, non-spectator) players, once per turn.
-  // One click splats over all but the last 2 letters for ~75% of the time left.
-  const tomatoBtn = document.createElement("button");
-  tomatoBtn.id = "tomato-btn";
-  tomatoBtn.title = "Throw a tomato at the speller's word";
-  document.body.appendChild(tomatoBtn);
+  // ---- tomato power-up (3D) ----
+  // A tomato idles in the lower-right corner (camera-anchored) and spins on a
+  // tilted axis while you can throw. Click it to throw: the splat lands on the
+  // board for ~75% of the time left, covering all but the last 2 letters. On the
+  // server round-trip (bee_splat) EVERYONE sees a tomato arc toward the board.
+  const tomato = makeTomato(camera, scene);
+
+  // Hover tooltip ("Throw tomato"), following the cursor.
+  const tomatoTip = document.createElement("div");
+  tomatoTip.id = "tomato-tip";
+  tomatoTip.textContent = "Throw tomato";
+  Object.assign(tomatoTip.style, {
+    position: "fixed", zIndex: "17", display: "none", pointerEvents: "none",
+    padding: "5px 10px", borderRadius: "8px", transform: "translate(-50%, -135%)",
+    background: "rgba(12,15,22,0.9)", color: "#ffd9d2", border: "1px solid #5a2b26",
+    font: "600 12px system-ui, sans-serif", whiteSpace: "nowrap",
+    boxShadow: "0 4px 14px rgba(0,0,0,0.5)",
+  } as any);
+  document.body.appendChild(tomatoTip);
 
   const canThrow = () =>
     phase === "match" && !amSpeller && !amSpectator && aliveIds.includes(localId) && !tomatoUsedThisTurn;
 
   const updateTomatoBtn = () => {
-    tomatoBtn.style.display = canThrow() ? "block" : "none";
+    tomato.setVisible(canThrow());
+    if (!canThrow()) { tomatoTip.style.display = "none"; document.body.style.cursor = ""; }
   };
-  tomatoBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
+
+  const tomatoNdc = (e: PointerEvent) =>
+    [(e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1] as const;
+
+  const throwTomato = () => {
     if (!canThrow()) return;
     net.sendBee({ type: "bee_tomato" });
     tomatoUsedThisTurn = true;
-    updateTomatoBtn();
+    tomato.setVisible(false); // the corner tomato vanishes; the flight starts on bee_splat
+    tomatoTip.style.display = "none";
+    document.body.style.cursor = "";
+  };
+
+  window.addEventListener("pointermove", (e) => {
+    if (!canThrow()) { if (tomatoTip.style.display !== "none") { tomatoTip.style.display = "none"; document.body.style.cursor = ""; } return; }
+    const [x, y] = tomatoNdc(e);
+    const over = tomato.hitTest(x, y);
+    tomatoTip.style.display = over ? "block" : "none";
+    if (over) { tomatoTip.style.left = `${e.clientX}px`; tomatoTip.style.top = `${e.clientY}px`; }
+    document.body.style.cursor = over ? "pointer" : "";
+  });
+  window.addEventListener("pointerdown", (e) => {
+    if (!canThrow()) return;
+    const [x, y] = tomatoNdc(e);
+    if (tomato.hitTest(x, y)) { e.stopPropagation(); throwTomato(); }
   });
 
   // ---- top-right universal menu (always visible: lobby + match) ----
@@ -487,9 +521,25 @@ export function setupBee(opts: BeeOpts): BeeStage {
         enterMatch(m.order ?? []);
         break;
 
-      case "bee_splat":
-        classroom.splatTomato(m.durationMs ?? 4000); // a tomato landed
+      case "bee_splat": {
+        const dur = m.durationMs ?? 4000;
+        const onLand = () => classroom.splatTomato(dur); // splat appears when it lands
+        // Launch a tomato arcing from the thrower toward the board, then splat.
+        // Thrower sees it leave their own corner; everyone else sees it leave the
+        // thrower's avatar. Unknown thrower (no avatar) → just splat, no flight.
+        const target = new THREE.Vector3();
+        (classroom.boardMesh as THREE.Object3D).getWorldPosition(target);
+        let from: THREE.Vector3 | null = null;
+        if (m.by && m.by === localId) {
+          from = tomato.cornerWorldPos(new THREE.Vector3());
+        } else if (m.by) {
+          const av = avatars.get(m.by);
+          if (av) { from = new THREE.Vector3(); av.getWorldPosition(from); from.y += 1.4; }
+        }
+        if (from) tomato.launch(from, target, onLand);
+        else onLand();
         break;
+      }
 
       case "bee_turn": {
         activeSpeller = m.spellerId;
@@ -648,8 +698,9 @@ export function setupBee(opts: BeeOpts): BeeStage {
   };
 
   return {
-    update: () => {
+    update: (dt: number) => {
       applyCamera(phase === "match" ? classroom.matchCam : classroom.lobbyCam);
+      tomato.update(dt); // anchor + spin the corner tomato; advance any flights
 
       // Seats + speller are placed once by seatPlayers() on each state change; only
       // re-apply them every frame in mock/dev so the debug sliders stay live.

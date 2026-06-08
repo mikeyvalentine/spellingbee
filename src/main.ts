@@ -102,7 +102,7 @@ async function main(): Promise<void> {
   avatars.setModel(localId, avatars.pickUnusedModel());
   if (latestParticipants.length) avatars.sync(latestParticipants);
 
-  match = setupBee({ net, localId, getName, camera, avatars, classroom, callRoomKey: source.roomKey, debug: !inDiscord });
+  match = setupBee({ net, localId, getName, camera, scene, avatars, classroom, callRoomKey: source.roomKey, debug: !inDiscord });
   for (const m of pending) match.handle(m); // replay anything that arrived early
   pending.length = 0;
 
@@ -117,7 +117,7 @@ async function main(): Promise<void> {
     // wastes the GPU and uploads the heavy scene into every context.
     if (document.hidden) return;
     const dt = Math.min(clock.getDelta(), 0.05);
-    if (match) match.update(); // drives the lobby/match camera + speller
+    if (match) match.update(dt); // drives the lobby/match camera + speller + tomato
     clipboard.update(dt); // anchor + animate the lobby clipboard (after the camera is set)
     lobby.frame(); // position the paper panel over the clipboard
     avatars.setLabelsHidden(clipboard.isFocused()); // hide nametags while the clipboard is up

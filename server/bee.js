@@ -516,7 +516,7 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
     tomatoThrowers.add(senderId);
     const remaining = turnEndsAt ? Math.max(0, turnEndsAt - Date.now()) : ROUND_MS;
     const durationMs = Math.round(remaining * 0.75);
-    broadcast({ type: "bee_splat", spellerId: speller, round, durationMs });
+    broadcast({ type: "bee_splat", spellerId: speller, by: senderId, round, durationMs });
   };
 
   // Voluntarily stop playing this match (a "spectate" from the menu): drop out
