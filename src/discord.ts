@@ -13,16 +13,11 @@ export async function initDiscord(): Promise<RoomSource> {
   const sdk = new DiscordSDK(CLIENT_ID);
   await sdk.ready();
 
-  // The 3D match view is authored for a wide (landscape) frame, so lock phones
-  // to landscape. No-ops on desktop; wrapped defensively so an unsupported
-  // platform/SDK version never blocks startup.
-  try {
-    await sdk.commands.setOrientationLockState({
-      lock_state: Common.OrientationLockStateTypeObject.LANDSCAPE,
-    });
-  } catch (e) {
-    console.warn("setOrientationLockState failed:", e);
-  }
+  // Lock phones to landscape (the match view is authored wide). Fire-and-forget —
+  // it has no bearing on auth, so don't let it sit on the startup critical path.
+  sdk.commands
+    .setOrientationLockState({ lock_state: Common.OrientationLockStateTypeObject.LANDSCAPE })
+    .catch((e) => console.warn("setOrientationLockState failed:", e));
 
   // 1) Get an OAuth code from Discord. The Discord client fills in the redirect_uri
   // from the app's registered OAuth2 → Redirects, so at least one must be set there
@@ -52,6 +47,11 @@ export async function initDiscord(): Promise<RoomSource> {
   const roomKey = `call:${sdk.instanceId}`;
 
   let participantsCb: ((list: Participant[]) => void) | null = null;
+  let latest: Participant[] = [];
+  const emit = (list: Participant[]) => {
+    latest = list;
+    participantsCb?.(list);
+  };
 
   const toParticipant = (p: {
     id: string;
@@ -63,30 +63,29 @@ export async function initDiscord(): Promise<RoomSource> {
     name: p.nickname || p.global_name || p.username || "Player",
   });
 
-  // Participants in this Activity instance. Defensive: payload shapes vary across
-  // SDK versions, so never let one missing field break spawn-in.
-  let initialParticipants: Participant[] = [];
-  try {
-    const initial = await sdk.commands.getInstanceConnectedParticipants();
-    initialParticipants = (initial?.participants ?? []).map(toParticipant);
-  } catch (e) {
-    console.warn("getInstanceConnectedParticipants failed:", e);
-  }
-
+  // Subscribe to participant updates. Defensive: payload shapes vary across SDK
+  // versions, so never let one missing field break spawn-in.
   try {
     sdk.subscribe("ACTIVITY_INSTANCE_PARTICIPANTS_UPDATE", (e) => {
-      participantsCb?.((e?.participants ?? []).map(toParticipant));
+      emit((e?.participants ?? []).map(toParticipant));
     });
   } catch (e) {
     console.warn("participants subscription failed:", e);
   }
+
+  // Fetch the initial set in the BACKGROUND — don't block connect on it (it's an
+  // extra Discord RPC round trip and only feeds the cosmetic roster/avatars).
+  sdk.commands
+    .getInstanceConnectedParticipants()
+    .then((initial) => emit((initial?.participants ?? []).map(toParticipant)))
+    .catch((e) => console.warn("getInstanceConnectedParticipants failed:", e));
 
   return {
     localUserId,
     roomKey,
     onParticipants(cb) {
       participantsCb = cb;
-      cb(initialParticipants); // re-emit the initial set now that we have a listener
+      if (latest.length) cb(latest); // re-emit whatever we have so far
     },
   };
 }

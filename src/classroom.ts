@@ -804,9 +804,12 @@ function makeChalkboard(): Chalkboard {
     const hideMs = Math.min(550, duration * 0.4);
     splat = { start: performance.now(), duration, revealMs, hideMs, cover, blobs: genSplatBlobs() };
     cancelAnimationFrame(splatRaf);
-    const tick = () => {
+    // Cap splat redraws to ~30fps — each redraw re-uploads the whole board texture
+    // to the GPU, so 60fps for the splat's full duration is wasteful.
+    let lastDraw = 0;
+    const tick = (now: number) => {
       if (!splat) return;
-      surf.redraw();
+      if (now - lastDraw >= 33) { lastDraw = now; surf.redraw(); }
       if (performance.now() - splat.start < splat.duration) splatRaf = requestAnimationFrame(tick);
       else { splat = null; surf.redraw(); }
     };
@@ -898,6 +901,9 @@ function makeStatsBoard(): StatsBoard {
   return {
     mesh,
     setStats: (name, wpm, accuracy) => {
+      // Skip the rebuild + full texture re-upload when nothing displayed changed
+      // (setStats fires on every keystroke, but WPM/acc are integers).
+      if (state && state.name === name && state.wpm === wpm && state.acc === accuracy) return;
       state = { name, wpm, acc: accuracy };
       rebuild();
     },

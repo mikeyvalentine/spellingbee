@@ -195,32 +195,26 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
     return w;
   };
 
-  // Pre-synthesize several easy words at startup so the FIRST word of every match
-  // has instant audio (Kokoro's first cold synth otherwise blocks ~1-2s with no
-  // prior pause to hide it). Round 1 draws from here (randomized, avoiding a
-  // back-to-back repeat) when available.
+  // Pre-synthesize a few easy words so the FIRST word of every match has instant
+  // audio. Round 1 draws from here (randomized, avoiding a back-to-back repeat)
+  // when available. Synthesized in PARALLEL (Google TTS is a network call, not a
+  // blocking local model), so the buffer fills in ~one round trip.
   const FIRST_WORDS = [];
   let lastFirstWord = null;
+  const PREWARM_TARGET = 8;
   const prewarmFirstWords = () => {
+    if (FIRST_WORDS.length >= PREWARM_TARGET) return;
     const easy = POOLS.easy;
     const picks = [];
-    while (picks.length < 12 && picks.length < easy.length) {
+    while (picks.length < PREWARM_TARGET && picks.length < easy.length) {
       const w = easy[Math.floor(Math.random() * easy.length)];
-      if (!picks.includes(w)) picks.push(w);
+      if (!picks.includes(w) && !FIRST_WORDS.includes(w)) picks.push(w);
     }
-    let i = 0;
-    const next = () => {
-      if (i >= picks.length) return;
-      if (phase === "match") return void setTimeout(next, 1500); // never block an active match
-      const w = picks[i++];
-      synth(w)
-        .then(() => FIRST_WORDS.push(w))
-        .catch(() => {})
-        .finally(() => setTimeout(next, 200));
-    };
-    next();
+    for (const w of picks) {
+      synth(w).then(() => { if (!FIRST_WORDS.includes(w)) FIRST_WORDS.push(w); }).catch(() => {});
+    }
   };
-  setTimeout(prewarmFirstWords, 3000); // let the model warm (see tts.js) first
+  prewarmFirstWords(); // immediately — no warm-up delay needed for Google TTS
 
   // Catch a client up to the in-progress match so they spectate from the shared
   // POV (they aren't added to the queue — they join when the match ends).
@@ -244,6 +238,7 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
       sendSpectatorState(id); // spectate; can't join mid-match
       return;
     }
+    prewarmFirstWords(); // top up the opening-word buffer before anyone can Start
     if (phase === "idle") {
       phase = "lobby";
       hostId = id;
@@ -316,10 +311,10 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
     playerStats.clear(); // reset per-player accuracy for the new match
     phase = "match";
     broadcast({ type: "bee_match_start", order: [...order], mode });
-    // Short prep pause before round 1, then begin. Don't pre-synth here (it would
-    // block the event loop and delay the opening turn) — beginTurn synthesizes
-    // after broadcasting bee_turn, so the speller appears immediately.
-    if (advanceAndPrepare(false)) setTimeout(beginTurn, 600);
+    // Brief beat before round 1, then begin. Warm the opening word's audio now —
+    // Google TTS is an async network call (non-blocking), so synthesizing here just
+    // overlaps the beat instead of delaying the turn.
+    if (advanceAndPrepare()) setTimeout(beginTurn, 200);
     else endMatch();
   };
 
@@ -358,13 +353,9 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
     }
   };
 
-  // Advance to the next alive speller, pick their word, and PRE-GENERATE its
-  // audio (so it's cached/instant when the turn plays). Returns false if no one
-  // is left. Run this at the START of the result pause to hide synth latency.
-  // `warm` pre-generates the word's audio so it's cached when the turn plays.
-  // Kokoro inference blocks the event loop, so we only warm during the between-
-  // turn result pause (where the latency is hidden) — NOT on the match-start path,
-  // where it would delay the opening turn from even appearing.
+  // Advance to the next alive speller, pick their word, and (if warm) pre-generate
+  // its audio so it's cached/instant when the turn plays. Returns false if no one
+  // is left. Run at the START of the result pause to hide synth latency.
   const advanceAndPrepare = (warm = true) => {
     if (alive.size === 0) return false;
     const prevIdx = turnIdx;
@@ -418,14 +409,12 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
       accuracy: matchAccuracy(turnSpeller), // cumulative match accuracy for the stats board
       alive: [...alive],
     });
+    // Fire synth NOW so a cache miss overlaps the UI beat instead of stacking
+    // after it (usually a cache hit anyway — warmed at start / during the pause).
+    const audioP = synth(turnWord).catch(() => null);
     setTimeout(async () => {
       if (phase !== "match" || round !== turnRound) return;
-      let audio = null;
-      try {
-        audio = await synth(turnWord);
-      } catch {
-        /* fall through silently */
-      }
+      const audio = await audioP;
       if (phase !== "match" || round !== turnRound) return;
       if (audio)
         broadcast({
@@ -440,7 +429,7 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
       turnEndsAt = Date.now() + ROUND_MS;
       timer = setTimeout(() => resolveTurn(null), ROUND_MS);
       if (isBot(turnSpeller)) botPlay(turnSpeller, turnRound);
-    }, 250);
+    }, 120);
   };
 
   const resolveTurn = (text) => {

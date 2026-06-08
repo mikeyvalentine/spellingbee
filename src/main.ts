@@ -4,10 +4,7 @@ import { loadClassroom } from "./classroom";
 import { connectNet } from "./net";
 import { setupLobby } from "./lobby";
 import { setupBee } from "./bee";
-import { isInDiscord, initDiscord } from "./discord";
-import { startMock } from "./mock";
-import { setupDebug } from "./debug";
-import type { RoomSource } from "./types";
+import type { RoomSource, Participant } from "./types";
 
 const CHARACTER_URLS = [
   "/characters/Astronaut.glb",
@@ -19,67 +16,65 @@ const CHARACTER_URLS = [
   "/characters/Zombie.glb",
 ];
 
+// Discord loads the Activity in an iframe with a `frame_id` query param. Inlined
+// (instead of importing from ./discord) so the Discord SDK stays out of the
+// initial bundle on the non-Discord/web path.
+const isInDiscord = () => new URLSearchParams(window.location.search).has("frame_id");
+
 async function main(): Promise<void> {
   const { scene, camera, renderer, clock } = setupScene();
   const avatars = new AvatarManager(scene);
-
-  const [, classroom] = await Promise.all([
-    avatars.loadModels(CHARACTER_URLS),
-    loadClassroom(scene),
-  ]);
-
-  // ---- identity / participants (Discord or local mock) ----
   const modeEl = document.getElementById("mode")!;
   const inDiscord = isInDiscord();
-  let source: RoomSource;
-  if (inDiscord) {
-    modeEl.textContent = "Discord mode";
-    source = await initDiscord();
-  } else {
-    modeEl.textContent = "Mock mode (local dev)";
-    source = startMock();
-  }
-  const localId = source.localUserId;
+  modeEl.textContent = inDiscord ? "Discord mode" : "Mock mode (local dev)";
 
+  // Identity (Discord auth or mock) and the heavy 3D assets load IN PARALLEL —
+  // the connect/lobby path must NOT wait for ~24MB of GLB. The SDK / mock module
+  // is dynamically imported so only the path actually used is in the bundle.
+  const sourceP: Promise<RoomSource> = inDiscord
+    ? import("./discord").then((m) => m.initDiscord())
+    : import("./mock").then((m) => m.startMock());
+  const assetsP = Promise.all([avatars.loadModels(CHARACTER_URLS), loadClassroom(scene)]);
+
+  // ---- identity ready → connect immediately (does not wait on assets) ----
+  const source = await sourceP;
+  const localId = source.localUserId;
   const names = new Map<string, string>([[localId, "You"]]);
-  // Use the real participant name for everyone (Discord fills in the local user's
-  // name); the lobby/roster appends "(you)" for the local player separately.
   const getName = (id: string) =>
     id.startsWith("bot:") ? "🤖 " + id.slice(4) : names.get(id) ?? "Player";
 
+  let assetsReady = false;
+  let latestParticipants: Participant[] = [];
   source.onParticipants((list) => {
+    latestParticipants = list;
     for (const p of list) names.set(p.id, p.name);
-    avatars.sync(list);
+    if (assetsReady) avatars.sync(list); // avatar clones need the models loaded
   });
 
-  // Give the local player a model immediately; the server reassigns a globally
-  // unique one on connect.
-  avatars.setModel(localId, avatars.pickUnusedModel());
-
-  // ---- networking ----
-  // Inside Discord every socket must ride the proxy; elsewhere hit /ws directly.
-  // VITE_WS_URL overrides both.
+  // Inside Discord every socket rides the proxy; elsewhere hit /ws directly.
+  // VITE_WS_URL overrides both. The hello `count` is a fixed constant (models are
+  // assigned deterministically by seat/chair in bee.ts), so connect needn't wait
+  // for the character GLBs to finish loading.
   const wsBase =
     import.meta.env.VITE_WS_URL ||
     (inDiscord
       ? `wss://${window.location.host}/.proxy/ws`
       : `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws`);
-  // Start in this client's room: Discord => its call's private room; otherwise a
-  // dev default. Public matchmaking reconnects to a `pub:<id>` room via setRoom.
-  const net = connectNet(wsBase, localId, avatars.modelCount, source.roomKey);
-  // Models are assigned deterministically by seat/chair (see CHAIR_MODELS in
-  // bee.ts), so we ignore the server's per-player model assignment here.
+  const net = connectNet(wsBase, localId, CHARACTER_URLS.length, source.roomKey);
   net.onLeave((id) => avatars.removePlayer(id));
 
-  // ---- lobby + match ----
+  // The lobby is 2D DOM — show it now, over the (still-loading) 3D scene.
   const lobby = setupLobby({ net, localId, getName, isMock: !inDiscord, callRoomKey: source.roomKey });
-  const match = setupBee({ net, localId, getName, camera, avatars, classroom, callRoomKey: source.roomKey });
-  lobby.show(); // landing screen while we connect
+  lobby.show();
 
+  // The 3D match stage needs the classroom; until it's built, buffer bee messages.
+  let match: ReturnType<typeof setupBee> | null = null;
+  const pending: any[] = [];
   const connectingEl = document.getElementById("connecting");
   net.onBee((m) => {
     if (connectingEl) connectingEl.style.display = "none"; // first state arrived
-    match.handle(m);
+    if (match) match.handle(m);
+    else pending.push(m);
     switch (m.type) {
       case "bee_lobby":
         if (m.phase === "lobby" || m.phase === "idle") {
@@ -95,24 +90,31 @@ async function main(): Promise<void> {
         break;
     }
   });
-
-  // Auto-join the lobby on (re)connect so being in the Activity = being in the lobby.
+  // Being in the Activity = being in the lobby; (re)join on every (re)connect.
   net.onReady(() => net.sendBee({ type: "bee_join" }));
 
-  // Dev-only hook to drive the match view locally (used for visual verification
-  // without a full server-hosted match) + the tuning slider panel. Mock only.
+  // ---- assets ready → build the 3D match stage + start rendering ----
+  const [, classroom] = await assetsP;
+  assetsReady = true;
+  avatars.setModel(localId, avatars.pickUnusedModel());
+  if (latestParticipants.length) avatars.sync(latestParticipants);
+
+  match = setupBee({ net, localId, getName, camera, avatars, classroom, callRoomKey: source.roomKey, debug: !inDiscord });
+  for (const m of pending) match.handle(m); // replay anything that arrived early
+  pending.length = 0;
+
+  // Dev-only: debug hook + tuning slider panel (lazy — kept out of the prod bundle).
   if (!inDiscord) {
     (window as any).__dbg = { match, classroom, lobby, localId, renderer, scene, camera, avatars };
-    setupDebug(classroom);
+    import("./debug").then((m) => m.setupDebug(classroom)).catch(() => {});
   }
 
-  // ---- render loop ----
   renderer.setAnimationLoop(() => {
     // Background tabs/frames (the preview runs several) shouldn't render — it
     // wastes the GPU and uploads the heavy scene into every context.
     if (document.hidden) return;
     const dt = Math.min(clock.getDelta(), 0.05);
-    match.update(); // drives the lobby/match camera + speller each frame
+    if (match) match.update(); // drives the lobby/match camera + speller
     avatars.update(dt);
     renderer.render(scene, camera);
   });

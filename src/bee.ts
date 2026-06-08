@@ -11,6 +11,7 @@ interface BeeOpts {
   avatars: AvatarManager;
   classroom: Classroom;
   callRoomKey: string; // this client's home room, to return to on "leave match"
+  debug?: boolean; // mock/dev: re-apply seat/speller transforms each frame (live sliders)
 }
 
 export interface BeeStage {
@@ -54,6 +55,7 @@ const tierColor = (t: string) =>
 
 export function setupBee(opts: BeeOpts): BeeStage {
   const { net, localId, getName, camera, avatars, classroom, callRoomKey } = opts;
+  const debug = !!opts.debug;
 
   // ---------- HUD elements ----------
   const hud = document.getElementById("match-hud")!;
@@ -80,6 +82,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
   let answered = false;
   let timerRaf = 0;
   let lastAudioRound = -1;
+  let cornersDirty = true; // board-button screen positions need recompute (resize/phase)
 
   // ---- tomato power-up ----
   let aliveIds: string[] = []; // current alive players (from bee_turn / result)
@@ -323,6 +326,11 @@ export function setupBee(opts: BeeOpts): BeeStage {
       if (phase === "match" && id === activeSpeller) {
         av.position.copy(classroom.spellerPos);
         av.scale.setScalar(classroom.spellerScale);
+        // Face the match camera (set once here, not re-applied every frame).
+        av.rotation.y = Math.atan2(
+          classroom.matchCam.pos.x - av.position.x,
+          classroom.matchCam.pos.z - av.position.z
+        );
         av.visible = true;
         return;
       }
@@ -355,6 +363,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
 
   const enterMatch = (order: string[]) => {
     phase = "match";
+    cornersDirty = true; // match camera differs from lobby — recompute board pins
     seatOrder = order.length ? order : seatOrder;
     amSpectator = order.length > 0 && !order.includes(localId);
     specBanner.style.display = amSpectator ? "block" : "none";
@@ -604,61 +613,68 @@ export function setupBee(opts: BeeOpts): BeeStage {
     }
   };
 
-  // Project the board's four corners and place an element at a requested bottom
-  // corner ("bl" = bottom-left, "br" = bottom-right) on screen.
+  // The board + camera are static at runtime, so the board's projected screen
+  // corners only change on resize or a phase (camera) change — cache them and
+  // recompute only when dirty, instead of projecting 4 corners every frame.
   const cornerV = new THREE.Vector3();
-  const positionBoardCorner = (el: HTMLElement, corner: "bl" | "br") => {
+  const blPos = { x: 0, y: 0 }, brPos = { x: 0, y: 0 };
+  window.addEventListener("resize", () => { cornersDirty = true; });
+
+  const computeBoardCorners = () => {
     const mesh = classroom.boardMesh as THREE.Mesh;
     const geo = mesh.geometry as THREE.PlaneGeometry;
     const hw = (geo.parameters?.width ?? 4) / 2;
     const hh = (geo.parameters?.height ?? 2) / 2;
     mesh.updateWorldMatrix(true, false);
-    let bx = 0, by = 0, best = -Infinity;
+    camera.updateMatrixWorld(true); // ensure matrixWorldInverse is current for project()
+    let blBest = -Infinity, brBest = -Infinity;
     for (const [x, y] of [[-hw, -hh], [hw, -hh], [-hw, hh], [hw, hh]]) {
       cornerV.set(x, y, 0).applyMatrix4(mesh.matrixWorld).project(camera);
       const sx = (cornerV.x * 0.5 + 0.5) * window.innerWidth;
       const sy = (-cornerV.y * 0.5 + 0.5) * window.innerHeight;
-      // bottom = largest sy; left = smallest sx, right = largest sx.
-      const metric = sy + (corner === "bl" ? -sx : sx);
-      if (metric > best) {
-        best = metric;
-        bx = sx;
-        by = sy;
-      }
+      if (sy - sx > blBest) { blBest = sy - sx; blPos.x = sx; blPos.y = sy; }
+      if (sy + sx > brBest) { brBest = sy + sx; brPos.x = sx; brPos.y = sy; }
     }
-    el.style.left = `${bx}px`;
-    el.style.top = `${by}px`;
+    cornersDirty = false;
+  };
+  const pin = (el: HTMLElement, p: { x: number; y: number }) => {
+    el.style.left = `${p.x}px`;
+    el.style.top = `${p.y}px`;
     el.style.display = "block";
   };
 
   return {
     update: () => {
       applyCamera(phase === "match" ? classroom.matchCam : classroom.lobbyCam);
-      // Re-apply seated positions every frame so the seat-offset slider is live.
-      seatOrder.forEach((id, i) => {
-        if (phase === "match" && (id === activeSpeller || i === 0)) return;
-        const av = avatars.get(id);
-        if (av && av.visible) placeSeated(av, i);
-      });
-      // Keep the speller placed/scaled live (so debug sliders apply) and turned
-      // to face the match camera.
-      if (phase === "match" && activeSpeller) {
-        const sp = avatars.get(activeSpeller);
-        if (sp) {
-          sp.position.copy(classroom.spellerPos);
-          sp.scale.setScalar(classroom.spellerScale);
-          const dx = classroom.matchCam.pos.x - sp.position.x;
-          const dz = classroom.matchCam.pos.z - sp.position.z;
-          sp.rotation.y = Math.atan2(dx, dz);
+
+      // Seats + speller are placed once by seatPlayers() on each state change; only
+      // re-apply them every frame in mock/dev so the debug sliders stay live.
+      if (debug) {
+        seatOrder.forEach((id, i) => {
+          if (phase === "match" && (id === activeSpeller || i === 0)) return;
+          const av = avatars.get(id);
+          if (av && av.visible) placeSeated(av, i);
+        });
+        if (phase === "match" && activeSpeller) {
+          const sp = avatars.get(activeSpeller);
+          if (sp) {
+            sp.position.copy(classroom.spellerPos);
+            sp.scale.setScalar(classroom.spellerScale);
+            sp.rotation.y = Math.atan2(
+              classroom.matchCam.pos.x - sp.position.x,
+              classroom.matchCam.pos.z - sp.position.z
+            );
+          }
         }
       }
 
       // Pin the Replay (bottom-left) + the speller's Confirm checkmark
-      // (bottom-right) to the board. On touch the slim match bar + keyboard
-      // handle these, so skip the floating ones.
+      // (bottom-right) to the board's cached corners. On touch the slim match bar
+      // + keyboard handle these, so skip the floating ones.
       if (phase === "match" && !isTouch) {
-        positionBoardCorner(boardReplay, "bl");
-        if (amSpeller && !answered) positionBoardCorner(boardCheck, "br");
+        if (cornersDirty) computeBoardCorners();
+        pin(boardReplay, blPos);
+        if (amSpeller && !answered) pin(boardCheck, brPos);
         else boardCheck.style.display = "none";
       } else {
         boardReplay.style.display = "none";

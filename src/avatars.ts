@@ -496,6 +496,11 @@ export class AvatarManager {
   update(dt: number): void {
     const t = performance.now() / 1000;
     for (const a of this.avatars.values()) {
+      // Invisible avatars (hidden seats, the match-camera seat, the speller's own
+      // POV) don't need their skinned-mesh pose advanced — skip the per-frame
+      // mixer.update entirely (the dominant per-avatar CPU cost). They're re-shown
+      // and re-posed by seatPlayers() on the next state change.
+      if (!a.root.visible) continue;
       // Posed avatars (seated players / the current speller) just loop idle —
       // they're placed each frame, so skip the locomotion/jump state machine.
       // A one-shot emote (e.g. the wrong-answer reaction) still plays through.
