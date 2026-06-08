@@ -275,6 +275,50 @@
         .roster { margin-bottom: 8px; }
         .lobby-hint { margin-top: 8px; }
       }
+
+      /* ---------- Mobile lobby: split the card up ----------
+         Bee icon + bare player names top-left (no box, drop-shadow for contrast);
+         the action buttons spaced evenly along the bottom of the screen. */
+      @media (pointer: coarse) {
+        #lobby {
+          left: max(10px, env(safe-area-inset-left)); right: auto;
+          top: max(10px, env(safe-area-inset-top));
+        }
+        .lobby-card {
+          background: none; border: 0; box-shadow: none; padding: 0;
+          min-width: 0; width: auto; max-width: 62vw; max-height: none; overflow: visible;
+        }
+        .lobby-title, .modes, .lobby-hint { display: none; }
+        #class-title { display: none !important; }
+        .lobby-logo {
+          font-size: 30px; line-height: 1; margin-bottom: 6px;
+          text-shadow: 0 2px 8px rgba(0,0,0,0.75);
+        }
+
+        /* Player list: bare names with a drop-shadow, no background. */
+        .roster {
+          display: flex; flex-direction: column; align-items: flex-start;
+          grid-template-columns: none; gap: 3px; margin: 0; min-height: 0;
+        }
+        .roster-row { background: none; white-space: nowrap; }
+        .roster-row .tick { text-shadow: 0 2px 5px rgba(0,0,0,0.85); }
+        .roster-name {
+          font-size: 15px; font-weight: 700;
+          text-shadow: 0 2px 6px rgba(0,0,0,0.9), 0 0 3px rgba(0,0,0,0.8);
+        }
+        .roster-empty { text-shadow: 0 2px 6px rgba(0,0,0,0.9); }
+
+        /* Action buttons spread evenly across the bottom of the page. */
+        .lobby-actions {
+          position: fixed; left: 0; right: 0;
+          bottom: max(12px, env(safe-area-inset-bottom));
+          flex-direction: row; flex-wrap: nowrap; justify-content: space-evenly;
+          align-items: center; gap: 8px; padding: 0 12px; z-index: 22;
+        }
+        .lobby-actions .btn {
+          width: auto; flex: 0 1 auto; padding: 12px 14px; font-size: 13px;
+        }
+      }
     </style>
   </head>
   <body>
