@@ -84,7 +84,6 @@ export function setupBee(opts: BeeOpts): BeeStage {
   let answered = false;
   let timerRaf = 0;
   let lastAudioRound = -1;
-  let cornersDirty = true; // board-button screen positions need recompute (resize/phase)
   let matchOver = false; // game-over screen showing — hide the board buttons
 
   // ---- tomato power-up ----
@@ -526,7 +525,6 @@ export function setupBee(opts: BeeOpts): BeeStage {
   const enterMatch = (order: string[]) => {
     phase = "match";
     matchOver = false;
-    cornersDirty = true; // match camera differs from lobby — recompute board pins
     seatOrder = order.length ? order : seatOrder;
     amSpectator = order.length > 0 && !order.includes(localId);
     specBanner.style.display = amSpectator ? "block" : "none";
@@ -817,12 +815,38 @@ export function setupBee(opts: BeeOpts): BeeStage {
     }
   };
 
+  // ---- subtle camera life: cursor parallax (both cams) + idle "breathing" bob
+  // (match only). Applied on top of the base pose every frame. ----
+  let targetMx = 0, targetMy = 0; // cursor in NDC [-1,1]
+  let curMx = 0, curMy = 0; // eased toward the target
+  let bobT = 0;
+  const MAX_YAW = 0.045, MAX_PITCH = 0.03; // cursor-look amounts (radians)
+  const BOB_Y = 0.014, BOB_X = 0.008; // breathing translation (world units)
+  window.addEventListener("pointermove", (e) => {
+    targetMx = (e.clientX / window.innerWidth) * 2 - 1;
+    targetMy = (e.clientY / window.innerHeight) * 2 - 1;
+  });
+  const applyCameraLife = (dt: number) => {
+    // Breathing bob (match only): a gentle up/down + side sway along the camera's
+    // own axes, two slightly different frequencies so it doesn't feel mechanical.
+    if (phase === "match") {
+      bobT += dt;
+      camera.translateY(Math.sin(bobT * 1.1) * BOB_Y);
+      camera.translateX(Math.sin(bobT * 0.73) * BOB_X);
+    }
+    // Cursor parallax (both cams): look slightly toward the cursor — right of the
+    // page pans the view right, etc. Eased so it glides rather than snaps.
+    curMx += (targetMx - curMx) * Math.min(1, dt * 5);
+    curMy += (targetMy - curMy) * Math.min(1, dt * 5);
+    camera.rotateY(-curMx * MAX_YAW);
+    camera.rotateX(-curMy * MAX_PITCH);
+  };
+
   // The board + camera are static at runtime, so the board's projected screen
   // corners only change on resize or a phase (camera) change — cache them and
   // recompute only when dirty, instead of projecting 4 corners every frame.
   const cornerV = new THREE.Vector3();
   const blPos = { x: 0, y: 0 }, brPos = { x: 0, y: 0 };
-  window.addEventListener("resize", () => { cornersDirty = true; });
 
   const computeBoardCorners = () => {
     const mesh = classroom.boardMesh as THREE.Mesh;
@@ -839,7 +863,6 @@ export function setupBee(opts: BeeOpts): BeeStage {
       if (sy - sx > blBest) { blBest = sy - sx; blPos.x = sx; blPos.y = sy; }
       if (sy + sx > brBest) { brBest = sy + sx; brPos.x = sx; brPos.y = sy; }
     }
-    cornersDirty = false;
   };
   const pin = (el: HTMLElement, p: { x: number; y: number }) => {
     el.style.left = `${p.x}px`;
@@ -850,6 +873,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
   return {
     update: (dt: number) => {
       applyCamera(phase === "match" ? classroom.matchCam : classroom.lobbyCam);
+      applyCameraLife(dt); // breathing bob (match) + cursor parallax (both)
       tomato.update(dt); // anchor + spin the corner tomato; advance any flights
       chalk.update(dt); // anchor + spin the corner golden chalk
 
@@ -878,7 +902,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
       // (bottom-right) to the board's cached corners. On touch the slim match bar
       // + keyboard handle these, so skip the floating ones.
       if (phase === "match" && !isTouch && !matchOver) {
-        if (cornersDirty) computeBoardCorners();
+        computeBoardCorners(); // camera bob/parallax moves each frame, so always recompute
         pin(boardReplay, blPos);
         if (amSpeller && !answered) pin(boardCheck, brPos);
         else boardCheck.style.display = "none";

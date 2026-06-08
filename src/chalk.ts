@@ -15,11 +15,12 @@ export interface ChalkView {
   hitTest(ndcX: number, ndcY: number): boolean;
 }
 
-const IDLE = { pos: new THREE.Vector3(0.44, -0.46, -1.35), scale: 0.34 };
+// Same bottom-right row as the tomato, just to its left, same height.
+const IDLE = { pos: new THREE.Vector3(0.55, -0.52, -1.35), scale: 0.227 };
 // Spin about the stick's own long axis, leaned over like the tomato's tilt.
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const TILT_DIR = new THREE.Vector3(0.30, 1, 0.06).normalize();
-const SPIN_SPEED = 0.85; // rad/s
+const SPIN_SPEED = 0.17; // rad/s (slow)
 const HOVER_SCALE = 0.14;
 // With bloom threshold ≈1.36, the emissive must sit just above it for a SUBTLE
 // rim glow (the low bloom strength/radius keep the halo small) — not the blown

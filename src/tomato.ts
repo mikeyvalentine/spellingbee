@@ -19,9 +19,10 @@ export interface TomatoView {
   launch(from: THREE.Vector3, to: THREE.Vector3, onLand: () => void): void;
 }
 
-const IDLE = { pos: new THREE.Vector3(0.74, -0.46, -1.35), scale: 0.32 };
+// Row of corner items, bottom-right. Tomato is the right-most.
+const IDLE = { pos: new THREE.Vector3(0.74, -0.52, -1.35), scale: 0.21 };
 const SPIN_AXIS = new THREE.Vector3(0.32, 1, 0.06).normalize();
-const SPIN_SPEED = 0.9; // rad/s
+const SPIN_SPEED = 0.18; // rad/s (slow)
 const FLIGHT_MS = 413; // throw speed
 const HOVER_SCALE = 0.14;
 const HOVER_GLOW = 0.34; // peak emissive on hover
@@ -103,7 +104,7 @@ export function makeTomato(camera: THREE.PerspectiveCamera, scene: THREE.Scene):
       f.mesh.position.lerpVectors(f.from, f.to, easeIn(p));
       f.mesh.position.y += Math.sin(p * Math.PI) * f.arc; // parabolic lift
       f.mesh.rotateOnAxis(SPIN_AXIS, dt * 9); // fast tumble in flight
-      f.mesh.scale.setScalar(0.32 * (1 - 0.45 * p)); // shrink slightly as it lands
+      f.mesh.scale.setScalar(IDLE.scale * (1 - 0.45 * p)); // shrink slightly as it lands
       if (p >= 1) {
         scene.remove(f.mesh);
         flights.splice(i, 1);
@@ -123,7 +124,7 @@ export function makeTomato(camera: THREE.PerspectiveCamera, scene: THREE.Scene):
     launch: (from, to, onLand) => {
       const mesh = buildTomato();
       mesh.position.copy(from);
-      mesh.scale.setScalar(0.32);
+      mesh.scale.setScalar(IDLE.scale);
       scene.add(mesh);
       flights.push({ mesh, from: from.clone(), to: to.clone(), arc: from.distanceTo(to) * 0.17, t: 0, onLand });
     },
