@@ -20,7 +20,7 @@ export interface TomatoView {
 const IDLE = { pos: new THREE.Vector3(0.66, -0.46, -1.35), scale: 0.32 };
 const SPIN_AXIS = new THREE.Vector3(0.32, 1, 0.06).normalize();
 const SPIN_SPEED = 0.9; // rad/s
-const FLIGHT_MS = 620;
+const FLIGHT_MS = 413; // throw speed (was 620 — 1.5x faster)
 
 function buildTomato(): THREE.Group {
   const g = new THREE.Group();
