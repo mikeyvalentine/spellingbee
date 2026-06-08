@@ -88,6 +88,8 @@ export interface Classroom {
   clearReveals(): void;
   /** Highlight the letter slot the chalk is aiming at (-1 clears the oval). */
   setBoardAim(index: number): void;
+  /** Pulse an oval on every letter slot (the chalk's "pick any letter" state). */
+  setBoardAimAll(): void;
   /** Hit-test a pointer (NDC) against the board's letter slots; returns index or -1. */
   boardSlotAt(ndcX: number, ndcY: number, camera: THREE.Camera): number;
   /** Enable the blinking awaiting-"_" cursor (only on the local speller's POV). */
@@ -141,6 +143,7 @@ export async function loadClassroom(scene: THREE.Scene): Promise<Classroom> {
     clearReveals: board.clearReveals,
     setBoardCursorEnabled: board.setCursorEnabled,
     setBoardAim: board.setAim,
+    setBoardAimAll: board.setAimAll,
     boardSlotAt: (ndcX, ndcY, cam) => {
       boardRay.setFromCamera(boardNdc.set(ndcX, ndcY), cam);
       const hit = boardRay.intersectObject(board.mesh, false)[0];
@@ -703,7 +706,8 @@ interface Chalkboard {
   setEnd(title: string, subtitle: string): void; // game-over screen
   revealLetter(index: number, letter: string): void; // golden-chalk reveal
   clearReveals(): void;
-  setAim(index: number): void; // -1 clears the aim oval
+  setAim(index: number): void; // -1 clears, >=0 pulses one slot
+  setAimAll(): void; // pulse every slot ("pick any letter")
   slotAtUV(u: number, v: number): number; // board UV -> letter-slot index (-1 = none)
   setCursorEnabled(on: boolean): void; // blink the awaiting "_" (local speller only)
 }
@@ -729,7 +733,11 @@ function makeChalkboard(): Chalkboard {
   let wordLen = 0; // number of letter cells this turn
   // Golden-chalk reveals: slot index -> { gold letter, fade start, char it replaced }.
   const reveals = new Map<number, { letter: string; start: number; prev: string }>();
-  let aimIndex = -1; // slot currently highlighted by the chalk aim oval (-1 = none)
+  // Chalk aim ovals: mode 0 = off, 1 = all slots, 2 = the single `aimIndex` slot.
+  // While aiming, the oval(s) pulse (fade in/out) via aimTimer.
+  let aimMode: 0 | 1 | 2 = 0;
+  let aimIndex = -1;
+  let aimTimer = 0;
   let revealRaf = 0;
   // Blinking text cursor on the slot awaiting input (leftmost empty, NON-gold slot).
   // Only enabled on the local speller's own POV (other clients see static cells).
@@ -952,23 +960,32 @@ function makeChalkboard(): Chalkboard {
     c.restore();
   };
 
-  // Golden oval around the slot the chalk is currently aiming at.
+  // Golden pulsing oval(s) the chalk is aiming at: all slots (mode 1) or the one
+  // selected slot (mode 2). Opacity fades in/out in a loop.
   const drawAimOverlay = (c: CanvasRenderingContext2D) => {
-    if (aimIndex < 0 || resultMode || endMode) return;
+    if (aimMode === 0 || resultMode || endMode) return;
     const n = wordLen;
-    if (aimIndex >= n) return;
+    if (n < 1) return;
     const { cellW, fontSize, startX, yc } = cellGeom(n);
-    const cx = startX + aimIndex * cellW + cellW / 2;
+    const a = 0.25 + 0.6 * (0.5 + 0.5 * Math.sin(performance.now() / 260)); // fade loop
     c.save();
     c.strokeStyle = GOLD;
     c.lineWidth = 6;
     c.shadowColor = GOLD;
     c.shadowBlur = 18;
-    c.beginPath();
-    c.ellipse(cx, yc, cellW * 0.52, fontSize * 0.6, 0, 0, Math.PI * 2);
-    c.stroke();
+    c.globalAlpha = a;
+    const drawOne = (i: number) => {
+      const cx = startX + i * cellW + cellW / 2;
+      c.beginPath();
+      c.ellipse(cx, yc, cellW * 0.52, fontSize * 0.6, 0, 0, Math.PI * 2);
+      c.stroke();
+    };
+    if (aimMode === 1) for (let i = 0; i < n; i++) drawOne(i);
+    else if (aimIndex >= 0 && aimIndex < n) drawOne(aimIndex);
     c.restore();
   };
+  const startAimPulse = () => { if (!aimTimer) aimTimer = window.setInterval(() => surf.redraw(), 33); };
+  const stopAimPulse = () => { if (aimTimer) { window.clearInterval(aimTimer); aimTimer = 0; } };
 
   surf.setAfterDraw((c) => { drawCursorOverlay(c); drawRevealOverlay(c); drawAimOverlay(c); drawSplatOverlay(c); });
 
@@ -1004,12 +1021,18 @@ function makeChalkboard(): Chalkboard {
   };
   const clearReveals = () => {
     reveals.clear();
-    aimIndex = -1;
+    aimMode = 0; aimIndex = -1; stopAimPulse();
     cancelAnimationFrame(revealRaf);
   };
+  // index < 0 turns aim off; index >= 0 aims (pulses) the single slot.
   const setAim = (index: number) => {
-    if (aimIndex === index) return;
-    aimIndex = index;
+    if (index < 0) { aimMode = 0; aimIndex = -1; stopAimPulse(); }
+    else { aimMode = 2; aimIndex = index; startAimPulse(); }
+    surf.redraw();
+  };
+  // Aim ALL slots (pulsing) — the initial "pick any letter" state.
+  const setAimAll = () => {
+    aimMode = 1; aimIndex = -1; startAimPulse();
     surf.redraw();
   };
   const setCursorEnabled = (on: boolean) => {
@@ -1075,7 +1098,7 @@ function makeChalkboard(): Chalkboard {
     mesh, setGuess, setResult, clear, setHeader,
     writeIn: surf.writeIn, eraseOut: surf.eraseOut,
     splatTomato, clearSplat, setEnd,
-    revealLetter, clearReveals, setAim, slotAtUV, setCursorEnabled,
+    revealLetter, clearReveals, setAim, setAimAll, slotAtUV, setCursorEnabled,
   };
 }
 

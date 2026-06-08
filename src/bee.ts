@@ -231,27 +231,16 @@ export function setupBee(opts: BeeOpts): BeeStage {
     updateTomatoBtn();
   };
   itemTomato.addEventListener("click", (e) => { e.stopPropagation(); if (canThrow()) throwTomato(); });
-  itemChalk.addEventListener("click", (e) => { e.stopPropagation(); if (canChalk()) startAim(); });
+  // Tapping the chalk toggles aim mode (tap again to cancel without spending it).
+  itemChalk.addEventListener("click", (e) => { e.stopPropagation(); if (chalkAiming) cancelAim(); else if (canChalk()) startAim(); });
 
-  const firstEmptySlot = () => {
-    for (let i = 0; i < curLength; i++) if (!gold[i] && !slots[i]) return i;
-    return -1;
-  };
-
-  // Chalk aim mode: arm on click, then pick a board slot to reveal.
+  // Chalk aim: tap the chalk → EVERY slot pulses ("pick any letter"). Tap one →
+  // only that slot pulses (armed). Tap it again → confirm + reveal.
   function startAim() {
     chalkAiming = true;
+    armedAim = -1;
+    classroom.setBoardAimAll(); // all slots pulse
     document.body.style.cursor = "crosshair";
-    // Touch: pre-arm the next awaiting slot so tapping the chalk gives instant
-    // feedback (an oval) and revealing the next letter is a single tap. Desktop
-    // uses hover instead, so leave the oval off until the cursor moves.
-    if (isTouch) {
-      armedAim = firstEmptySlot();
-      classroom.setBoardAim(armedAim);
-    } else {
-      armedAim = -1;
-      classroom.setBoardAim(-1);
-    }
   }
   function cancelAim() {
     chalkAiming = false;
@@ -260,13 +249,13 @@ export function setupBee(opts: BeeOpts): BeeStage {
     document.body.style.cursor = "";
   }
 
-  // Desktop: hover the board's letter slots (the oval follows the cursor), click
-  // one to reveal. Touch has no hover, so it's handled in pointerdown below.
+  // Desktop: hovering narrows the pulse to the hovered slot (all slots when off
+  // the row); click confirms. Touch has no hover, so it's all in pointerdown.
   window.addEventListener("pointermove", (e) => {
     if (!chalkAiming || isTouch) return;
     const [x, y] = ndcOf(e);
     const idx = classroom.boardSlotAt(x, y, camera);
-    classroom.setBoardAim(idx);
+    if (idx >= 0) classroom.setBoardAim(idx); else classroom.setBoardAimAll();
     document.body.style.cursor = idx >= 0 ? "pointer" : "crosshair";
   });
   window.addEventListener("pointerdown", (e) => {
@@ -276,13 +265,13 @@ export function setupBee(opts: BeeOpts): BeeStage {
     const [x, y] = ndcOf(e);
     const idx = classroom.boardSlotAt(x, y, camera);
     if (isTouch) {
-      // Two-tap: first tap on a slot shows the oval, a second tap on the SAME slot
-      // confirms + reveals. Tapping empty space cancels (without spending it).
-      if (idx < 0) cancelAim();
-      else if (idx === armedAim) { net.sendBee({ type: "bee_chalk", index: idx }); cancelAim(); }
+      // First tap on a slot narrows to it; a second tap on the SAME slot confirms.
+      // Off-slot taps are ignored (tap the chalk again to cancel).
+      if (idx < 0) return;
+      if (idx === armedAim) { net.sendBee({ type: "bee_chalk", index: idx }); cancelAim(); }
       else { armedAim = idx; classroom.setBoardAim(idx); }
     } else {
-      // Desktop: the hover already showed the oval, so a click confirms immediately.
+      // Desktop: the hover already narrowed the oval, so a click confirms.
       if (idx >= 0) net.sendBee({ type: "bee_chalk", index: idx });
       cancelAim();
     }
