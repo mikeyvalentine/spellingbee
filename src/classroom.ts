@@ -80,6 +80,8 @@ export interface Classroom {
   setAim(index: number | null): void;
   /** Map a board-plane UV hit (from a raycast) to a word-cell index. */
   boardCellFromUV(u: number, v: number): number | null;
+  /** Game-over screen on the main board: a title with an optional subtitle. */
+  setEndScreen(title: string, subtitle: string): void;
 }
 
 const norm = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -125,6 +127,7 @@ export async function loadClassroom(scene: THREE.Scene): Promise<Classroom> {
     setSplats: board.setSplats,
     setAim: board.setAim,
     boardCellFromUV: board.cellFromUV,
+    setEndScreen: board.setEnd,
   };
 }
 
@@ -582,6 +585,7 @@ interface Chalkboard {
   setSplats(cells: number[]): void; // tomato splats (server-driven)
   setAim(index: number | null): void; // local aiming highlight
   cellFromUV(u: number, v: number): number | null; // raycast hit -> cell index
+  setEnd(title: string, subtitle: string): void; // game-over screen
 }
 
 function makeChalkboard(): Chalkboard {
@@ -602,6 +606,7 @@ function makeChalkboard(): Chalkboard {
   let splatCells: number[] = []; // tomato splats (from the server — everyone sees)
   let aimIndex: number | null = null; // local-only aiming highlight (the thrower)
   let resultMode: { guess: string; correct: boolean; answer: string } | null = null;
+  let endMode: { title: string; subtitle: string } | null = null;
 
   // Shared geometry for the word cells, so the glyph, the splat, the aim box, and
   // click hit-testing all line up exactly.
@@ -675,6 +680,15 @@ function makeChalkboard(): Chalkboard {
 
   const rebuild = () => {
     const lines: Line[] = [];
+    if (endMode) {
+      // Game-over screen: "GAME OVER" with the winner below (no header/cells).
+      lines.push({ glyphs: layoutCentered(ctx, [{ text: endMode.title, color: CHALK, font: `700 96px ${FONT}` }], W / 2, 205), noReveal: true });
+      if (endMode.subtitle) {
+        lines.push({ glyphs: layoutCentered(ctx, [{ text: endMode.subtitle, color: CHALK, font: `600 54px ${FONT}` }], W / 2, 330), noReveal: true });
+      }
+      surf.setLines(lines);
+      return;
+    }
     if (header) {
       const segs = [{ text: header, color: CHALK, font: `600 46px ${FONT}` }];
       if (headerAccent) {
@@ -730,6 +744,7 @@ function makeChalkboard(): Chalkboard {
 
   const setGuess = (typed: string, length: number) => {
     resultMode = null; // typing always clears a prior result
+    endMode = null;
     const t = typed.toUpperCase().slice(0, length);
     cells = [];
     for (let i = 0; i < length; i++) cells.push(t[i] ?? "_");
@@ -748,6 +763,10 @@ function makeChalkboard(): Chalkboard {
     headerAccent = accent;
     rebuild();
   };
+  const setEnd = (title: string, subtitle: string) => {
+    endMode = { title, subtitle };
+    rebuild();
+  };
 
   setGuess("", 0);
   if (document.fonts) document.fonts.ready.then(() => rebuild()).catch(() => {});
@@ -755,7 +774,7 @@ function makeChalkboard(): Chalkboard {
   return {
     mesh, setGuess, setResult, clear, setHeader,
     writeIn: surf.writeIn, eraseOut: surf.eraseOut,
-    setSplats, setAim, cellFromUV,
+    setSplats, setAim, cellFromUV, setEnd,
   };
 }
 

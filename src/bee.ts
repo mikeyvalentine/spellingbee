@@ -10,6 +10,7 @@ interface BeeOpts {
   camera: THREE.PerspectiveCamera;
   avatars: AvatarManager;
   classroom: Classroom;
+  callRoomKey: string; // this client's home room, to return to on "leave match"
 }
 
 export interface BeeStage {
@@ -52,7 +53,7 @@ const tierColor = (t: string) =>
   t === "easy" ? "#f4f1e8" : t === "medium" ? "#ffd23b" : "#ff6b6b";
 
 export function setupBee(opts: BeeOpts): BeeStage {
-  const { net, localId, getName, camera, avatars, classroom } = opts;
+  const { net, localId, getName, camera, avatars, classroom, callRoomKey } = opts;
 
   // ---------- HUD elements ----------
   const hud = document.getElementById("match-hud")!;
@@ -179,6 +180,61 @@ export function setupBee(opts: BeeOpts): BeeStage {
       cancelAim();
       e.preventDefault();
     }
+  });
+
+  // ---- top-right universal menu (always visible: lobby + match) ----
+  const menuBtn = document.getElementById("menu-btn")!;
+  const menuPanel = document.getElementById("menu-panel")!;
+  const menuItems = document.getElementById("menu-items")!;
+
+  const closeMenu = () => menuPanel.classList.remove("on");
+
+  // Become a spectator for the rest of this match (rejoin next match).
+  const becomeSpectator = () => {
+    if (phase !== "match" || amSpectator) return;
+    net.sendBee({ type: "bee_spectate" });
+    amSpectator = true;
+    amSpeller = false;
+    answered = true;
+    specBanner.style.display = "block";
+    updateMatchHud();
+    updateTomatoBtn();
+  };
+  // Leave the current match/room: public room -> back to your home lobby; your
+  // own/home room -> a fresh empty lobby.
+  const leaveMatch = () => {
+    const dest = net.currentRoom() === callRoomKey
+      ? `solo:${localId}-${Math.random().toString(36).slice(2, 7)}`
+      : callRoomKey;
+    net.setRoom(dest);
+  };
+
+  const renderMenu = () => {
+    const out: string[] = [];
+    if (phase === "match") {
+      if (!amSpectator && aliveIds.includes(localId)) {
+        out.push(`<button class="menu-item" id="mi-spectate">👀 Spectate</button>`);
+      }
+      out.push(`<button class="menu-item danger" id="mi-leave">🚪 Leave match</button>`);
+      out.push(`<div class="menu-sep"></div>`);
+    }
+    out.push(`<div class="menu-item disabled">⚙ Settings — coming soon</div>`);
+    menuItems.innerHTML = out.join("");
+    document.getElementById("mi-spectate")?.addEventListener("click", () => { becomeSpectator(); closeMenu(); });
+    document.getElementById("mi-leave")?.addEventListener("click", () => { leaveMatch(); closeMenu(); });
+  };
+
+  menuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = menuPanel.classList.toggle("on");
+    if (open) renderMenu();
+  });
+  // Click anywhere else closes the menu.
+  window.addEventListener("pointerdown", (e) => {
+    if (!menuPanel.classList.contains("on")) return;
+    const t = e.target as HTMLElement;
+    if (t.closest("#menu-panel") || t.closest("#menu-btn")) return;
+    closeMenu();
   });
 
   // Click/tap a chalkboard cell to throw there (raycast onto the board plane).
@@ -564,13 +620,10 @@ export function setupBee(opts: BeeOpts): BeeStage {
       case "bee_over": {
         cancelAnimationFrame(timerRaf);
         const w = m.winnerId as string | null;
-        whoEl.textContent = "🏆 Match over";
-        statusEl.textContent = w
-          ? w === localId
-            ? "🏆 You win!"
-            : `🏆 ${getName(w)} wins!`
-          : `Game over — reached round ${m.rounds}`;
-        classroom.setBoardHeader(w ? `🏆 ${getName(w)} wins!` : "Game over");
+        whoEl.textContent = "Game Over";
+        statusEl.textContent = w ? `Winner: ${getName(w)}` : "Game over";
+        // Game-over screen on the board: "GAME OVER" + "Winner: <name>" below.
+        classroom.setEndScreen("GAME OVER", w ? `Winner: ${getName(w)}` : "");
         classroom.clearStats();
         answered = true;
         aliveIds = [];

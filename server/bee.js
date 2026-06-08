@@ -528,6 +528,23 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
     broadcast({ type: "bee_splat", spellerId: speller, round, cells: [...turnSplats] });
   };
 
+  // Voluntarily stop playing this match (a "spectate" from the menu): drop out
+  // like an elimination but stay connected to watch; you rejoin the next match.
+  const spectate = (id) => {
+    if (phase !== "match" || !alive.has(id)) return;
+    if (id === speller) {
+      accepting = true; // force-resolve their open turn as a miss
+      resolveTurn(null);
+      return;
+    }
+    alive.delete(id);
+    const multiplayer = order.length >= 2;
+    if ((multiplayer && alive.size <= 1) || alive.size === 0) {
+      clearTimeout(timer);
+      endMatch();
+    }
+  };
+
   return {
     handle(id, m) {
       switch (m.type) {
@@ -570,6 +587,9 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
           break;
         case "bee_tomato":
           throwTomato(id, m.cell);
+          break;
+        case "bee_spectate":
+          spectate(id);
           break;
         case "bee_sync":
           if (phase === "match") sendSpectatorState(id);

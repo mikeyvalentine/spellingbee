@@ -73,7 +73,7 @@ async function main(): Promise<void> {
 
   // ---- lobby + match ----
   const lobby = setupLobby({ net, localId, getName, isMock: !inDiscord, callRoomKey: source.roomKey });
-  const match = setupBee({ net, localId, getName, camera, avatars, classroom });
+  const match = setupBee({ net, localId, getName, camera, avatars, classroom, callRoomKey: source.roomKey });
   lobby.show(); // landing screen while we connect
 
   const connectingEl = document.getElementById("connecting");
