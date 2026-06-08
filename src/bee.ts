@@ -499,6 +499,21 @@ export function setupBee(opts: BeeOpts): BeeStage {
   const isTouch = window.matchMedia("(pointer: coarse)").matches;
   input.readOnly = !isTouch;
 
+  // No cheating: block copy/cut/paste/drop on the guess field so the word can't be
+  // pasted in wholesale (the touch field is editable; desktop's is read-only). The
+  // beforeinput guard also stops paste/drop insertions the clipboard events miss.
+  input.setAttribute("autocomplete", "off");
+  input.setAttribute("autocorrect", "off");
+  input.setAttribute("autocapitalize", "off");
+  input.setAttribute("spellcheck", "false");
+  for (const ev of ["paste", "copy", "cut", "drop"]) {
+    input.addEventListener(ev, (e) => e.preventDefault());
+  }
+  input.addEventListener("beforeinput", (e) => {
+    const it = (e as InputEvent).inputType || "";
+    if (it.startsWith("insertFromPaste") || it.startsWith("insertFromDrop")) e.preventDefault();
+  });
+
   // Mirror the current guess to the 3D board + spectators (censored). Leaves
   // input.value alone so it never fights the native field while typing.
   const pushGuess = () => {
