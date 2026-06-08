@@ -11,20 +11,23 @@ server-authoritative game logic and TTS, with a new classroom-based match view.
 
 ## Running locally (mock mode — no Discord needed)
 
-Two processes:
+Two processes (the Worker runtime is the full backend — per-call rooms + public
+matchmaking + Durable Objects + Google TTS):
 
 ```bash
 npm install
-npm run server   # Node WS relay + Kokoro TTS on :3001 (first run downloads the TTS model)
-npm run dev      # Vite client on :5173
+npm run cf:dev   # Worker backend (Durable Objects) on :8788
+npm run dev      # Vite client on :5173 (proxies /api + /ws to :8788)
 ```
 
 Open http://localhost:5173. You land in the lobby as the host. Use **+ Add bots**
-to fill the room, then **Start match**. Bots spell automatically (~60% accuracy)
-so you can watch the full loop solo.
+to fill the room, then **Start match**, or **🌐 Play public** to quick-match /
+browse public rooms. Bots spell automatically (~60% accuracy) so you can watch the
+full loop solo.
 
-> Run both processes. The client always talks to the Node server over `/ws`
-> (proxied by Vite), even in mock mode — that's where the game logic + TTS live.
+> Simpler single-room backend: `npm run server` (Node, :3001) then
+> `VITE_DEV_BACKEND=http://localhost:3001 npm run dev`. It lacks rooms/matchmaking;
+> deploys (Cloudflare/Railway) are unaffected.
 
 ## Running inside Discord
 
