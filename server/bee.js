@@ -87,6 +87,15 @@ const tierForLap = (lap, players) => {
   return "impossible";
 };
 
+// In-place Fisher-Yates shuffle.
+const shuffle = (arr) => {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+};
+
 export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
   // Public rooms auto-start (drop-in): once `minPlayers` are present, a countdown
   // runs and the match begins with no host action. Private rooms leave autoStart
@@ -299,7 +308,8 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
 
   const doStart = (requestedMode) => {
     clearCountdown();
-    order = [...queue];
+    // Randomize the line-up per match; the order then stays fixed for every lap.
+    order = shuffle([...queue]);
     mode = requestedMode || "basic";
     alive = new Set(order);
     turnIdx = -1;

@@ -107,11 +107,13 @@ export function setupBee(opts: BeeOpts): BeeStage {
   boardReplay.textContent = "↺ Replay"; // round replay arrow + chalk text
   Object.assign(boardReplay.style, {
     position: "fixed", zIndex: "15", display: "none",
-    transform: "translate(calc(-100% - 12px), calc(-100% - 10px))",
+    // Tucked closer into the board's bottom-right corner.
+    transform: "translate(calc(-100% - 5px), calc(-100% - 3px))",
     background: "none", border: "0", padding: "0", cursor: "pointer",
-    color: "#f4f1e8", // chalk
-    font: "600 24px 'ABC Stefan Simple', system-ui, sans-serif",
-    textShadow: "0 2px 4px rgba(0,0,0,0.45)",
+    // Styled like the muted "ROUND X" header: greyer chalk, a bit smaller.
+    color: "rgba(244,241,232,0.55)",
+    font: "600 19px 'ABC Stefan Simple', system-ui, sans-serif",
+    textShadow: "0 1px 3px rgba(0,0,0,0.4)",
   } as any);
   boardReplay.addEventListener("click", () => {
     if (lastBuffer) playBuffer(lastBuffer);

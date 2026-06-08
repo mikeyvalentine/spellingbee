@@ -116,11 +116,10 @@ export async function loadClassroom(scene: THREE.Scene): Promise<Classroom> {
     setStats: stats.setStats,
     clearStats: stats.clear,
     revealBoards: () => {
+      // Only the word cells write in; the header + stats board appear instantly.
       board.writeIn();
-      stats.writeIn();
     },
     hideBoards: (onDone) => {
-      stats.eraseOut();
       board.eraseOut(onDone);
     },
     setSplats: board.setSplats,
@@ -415,6 +414,7 @@ interface Line {
   glyphs: Glyph[];
   underlineY?: number;
   strikeY?: number; // horizontal line through the glyphs (wrong-answer strikethrough)
+  noReveal?: boolean; // always fully shown — exempt from the write-in/erase reveal
 }
 interface Surface {
   tex: THREE.CanvasTexture;
@@ -440,14 +440,15 @@ function makeSurface(w: number, h: number): Surface {
   let reveal = Infinity; // chars shown per line = min(reveal, line length)
   let raf = 0;
   let afterDraw: ((ctx: CanvasRenderingContext2D) => void) | null = null;
-  const maxLen = () => lines.reduce((m, l) => Math.max(m, l.glyphs.length), 0);
+  // Only revealable (non-noReveal) lines drive the write-in/erase length.
+  const maxLen = () => lines.reduce((m, l) => (l.noReveal ? m : Math.max(m, l.glyphs.length)), 0);
 
   const draw = () => {
     ctx.clearRect(0, 0, w, h);
     ctx.textBaseline = "middle";
     ctx.textAlign = "left";
     for (const line of lines) {
-      const n = Math.min(reveal, line.glyphs.length);
+      const n = line.noReveal ? line.glyphs.length : Math.min(reveal, line.glyphs.length);
       ctx.shadowColor = "rgba(0,0,0,0.4)";
       ctx.shadowBlur = 5;
       for (let i = 0; i < n; i++) {
@@ -491,6 +492,7 @@ function makeSurface(w: number, h: number): Surface {
   const run = (from: number, to: number, onDone?: () => void) => {
     cancelAnimationFrame(raf);
     reveal = from;
+    draw(); // render the start state NOW (prevents a 1-frame flash of full content)
     const dir = to >= from ? 1 : -1;
     let last = -1;
     let acc = 0;
@@ -678,7 +680,8 @@ function makeChalkboard(): Chalkboard {
       if (headerAccent) {
         segs.push({ text: ` · ${headerAccent.text}`, color: headerAccent.color, font: `600 46px ${FONT}` });
       }
-      lines.push({ glyphs: layoutCentered(ctx, segs, W / 2, 70) });
+      // Header shows instantly — only the word cells write in / erase out.
+      lines.push({ glyphs: layoutCentered(ctx, segs, W / 2, 70), noReveal: true });
     }
     if (resultMode) {
       const ans = resultMode.answer.toUpperCase();
@@ -780,18 +783,22 @@ function makeStatsBoard(): StatsBoard {
   mesh.name = "StatsBoardText";
 
   let state: { name: string; wpm: number; acc: number } | null = null;
-  const line = (text: string, font: string, y: number, underline = false): Line => {
-    const glyphs = layoutCentered(ctx, [{ text, color: CHALK, font }], W / 2, y);
+  const line = (text: string, font: string, y: number, cx = W / 2, underline = false): Line => {
+    const glyphs = layoutCentered(ctx, [{ text, color: CHALK, font }], cx, y);
     return underline ? { glyphs, underlineY: y + 38 } : { glyphs };
   };
   const rebuild = () => {
     if (!state) return surf.setLines([]);
+    // Name on top (unchanged); WPM (left) + ACCURACY (right) share one line,
+    // smaller and high enough that the seated avatar doesn't cover them. WPM is
+    // sized for up to 3 digits without crowding the accuracy column.
+    const lx = W * 0.27, rx = W * 0.73;
     surf.setLines([
-      line(state.name, `700 52px ${FONT}`, 70, true),
-      line(String(state.wpm), `700 110px ${FONT}`, 250),
-      line("WPM", `600 38px ${FONT}`, 334),
-      line(`${state.acc}%`, `700 110px ${FONT}`, 480),
-      line("ACCURACY", `600 38px ${FONT}`, 564),
+      line(state.name, `700 52px ${FONT}`, 70, W / 2, true),
+      line(String(state.wpm), `700 76px ${FONT}`, 232, lx),
+      line("WPM", `600 26px ${FONT}`, 292, lx),
+      line(`${state.acc}%`, `700 76px ${FONT}`, 232, rx),
+      line("ACCURACY", `600 24px ${FONT}`, 292, rx),
     ]);
   };
 
