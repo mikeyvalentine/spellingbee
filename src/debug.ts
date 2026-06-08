@@ -88,7 +88,7 @@ export function setupDebug(classroom: Classroom): void {
   });
   groups.push(pointLightGroup("Front point light", lights.front));
   if (lights.back) groups.push(pointLightGroup("Back point light", lights.back));
-  if (lights.window) groups.push(rectLightGroup("Window area light", lights.window));
+  if (lights.window instanceof THREE.RectAreaLight) groups.push(rectLightGroup("Window area light", lights.window));
 
   // Google TTS voice picker — click to preview (plays a sample) AND make it the
   // active game voice. Set GOOGLE_TTS_VOICE in .env to bake in your favorite.

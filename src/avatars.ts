@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js";
 import type { Participant } from "./types";
 
@@ -106,7 +107,7 @@ export class AvatarManager {
   }
 
   async loadModels(urls: string[]): Promise<void> {
-    const loader = new GLTFLoader();
+    const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
     this.models = await Promise.all(
       urls.map(async (url) => {
         const gltf = await loader.loadAsync(encodeURI(url));

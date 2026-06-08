@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 
 // The 3D environment, driven by public/assets/classroom.glb. Named markers:
 //   lobby                      camera = the lobby view (looks back at the class)
@@ -49,7 +50,7 @@ export interface Seat {
 export interface RoomLights {
   front: THREE.PointLight;
   back?: THREE.PointLight;
-  window?: THREE.RectAreaLight;
+  window?: THREE.RectAreaLight | THREE.PointLight; // PointLight on mobile (cheap)
 }
 
 export interface Classroom {
@@ -89,7 +90,7 @@ export async function loadClassroom(scene: THREE.Scene): Promise<Classroom> {
   const stats = makeStatsBoard();
   let layout: ClassroomLayout;
   try {
-    const gltf = await new GLTFLoader().loadAsync(GLB_URL);
+    const gltf = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(GLB_URL);
     layout = buildFromGlb(gltf.scene, board, stats);
   } catch (e) {
     console.warn("classroom.glb not loaded, using procedural fallback:", e);
@@ -239,14 +240,16 @@ function buildLights(root: THREE.Object3D, objs: Map<string, THREE.Object3D>): R
   root.add(back);
 
   // Window: rect-area light from the doorwindow_arealight plane — read its
-  // world position, size, and normal so it points into the room.
-  const win = buildWindowLight(objs.get("doorwindowarealight"));
+  // world position, size, and normal so it points into the room. On mobile the
+  // RectAreaLight's LTC shader is too costly per-pixel, so use a cheap PointLight.
+  const isMobile = window.matchMedia("(pointer: coarse)").matches;
+  const win = buildWindowLight(objs.get("doorwindowarealight"), isMobile);
   root.add(win);
 
   return { front, back, window: win };
 }
 
-function buildWindowLight(plane?: THREE.Object3D): THREE.RectAreaLight {
+function buildWindowLight(plane: THREE.Object3D | undefined, isMobile: boolean): THREE.RectAreaLight | THREE.PointLight {
   let center = FALLBACK_WINDOW.clone();
   let width = 3.5;
   let height = 3.0;
@@ -273,6 +276,12 @@ function buildWindowLight(plane?: THREE.Object3D): THREE.RectAreaLight {
     if (normal.dot(toCenter) < 0) normal.negate();
   }
 
+  if (isMobile) {
+    // Cheap stand-in: a warm PointLight just inside the window plane.
+    const pl = new THREE.PointLight(0xe9e2d2, 13, 12, 1.6);
+    pl.position.copy(center).add(normal.clone().multiplyScalar(0.3));
+    return pl;
+  }
   const light = new THREE.RectAreaLight(0xe9e2d2, 7.5, width, height); // tuned via debug (warm)
   light.position.copy(center);
   light.lookAt(center.clone().add(normal)); // -Z faces the normal → into the room

@@ -11,11 +11,15 @@ export interface SceneContext {
 export function setupScene(): SceneContext {
   const canvas = document.getElementById("app") as HTMLCanvasElement;
 
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  // Mobile profile: drop antialias, lower the DPR cap, and disable shadows (an
+  // extra scene pass). These are the biggest GPU levers on phones; desktop is
+  // unchanged.
+  const isMobile = window.matchMedia("(pointer: coarse)").matches;
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: !isMobile });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.5 : 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.enabled = !isMobile;
+  if (!isMobile) renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.0;

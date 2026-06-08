@@ -83,6 +83,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
   let timerRaf = 0;
   let lastAudioRound = -1;
   let cornersDirty = true; // board-button screen positions need recompute (resize/phase)
+  let matchOver = false; // game-over screen showing — hide the board buttons
 
   // ---- tomato power-up ----
   let aliveIds: string[] = []; // current alive players (from bee_turn / result)
@@ -346,6 +347,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
 
   const enterLobby = (queue: string[]) => {
     phase = "lobby";
+    matchOver = false;
     cancelAnimationFrame(timerRaf);
     activeSpeller = null;
     amSpectator = false;
@@ -363,6 +365,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
 
   const enterMatch = (order: string[]) => {
     phase = "match";
+    matchOver = false;
     cornersDirty = true; // match camera differs from lobby — recompute board pins
     seatOrder = order.length ? order : seatOrder;
     amSpectator = order.length > 0 && !order.includes(localId);
@@ -585,6 +588,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
 
       case "bee_over": {
         cancelAnimationFrame(timerRaf);
+        matchOver = true; // hide the board replay/confirm buttons on the end screen
         const w = m.winnerId as string | null;
         whoEl.textContent = "Game Over";
         statusEl.textContent = w ? `Winner: ${getName(w)}` : "Game over";
@@ -671,7 +675,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
       // Pin the Replay (bottom-left) + the speller's Confirm checkmark
       // (bottom-right) to the board's cached corners. On touch the slim match bar
       // + keyboard handle these, so skip the floating ones.
-      if (phase === "match" && !isTouch) {
+      if (phase === "match" && !isTouch && !matchOver) {
         if (cornersDirty) computeBoardCorners();
         pin(boardReplay, blPos);
         if (amSpeller && !answered) pin(boardCheck, brPos);
