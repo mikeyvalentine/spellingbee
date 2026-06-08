@@ -446,7 +446,6 @@ interface SplatBlobs {
   seeds: { x: number; y: number; r: number }[];
 }
 const easeOutBack = (p: number) => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2); };
-const easeInCubic = (p: number) => p * p * p;
 // Random splatter geometry, generated once per throw (so it doesn't flicker).
 // Geometry is normalized so the shape's max reach is ~1.25 of half-W/H (lobes)
 // and drips stay within ~1.3 of half-H below — the overlay uses those bounds to
@@ -716,35 +715,42 @@ function makeChalkboard(): Chalkboard {
     const n = cells.length;
     if (n < 1) return;
     const t = performance.now() - splat.start;
-    const { duration, revealMs, hideMs, cover } = splat;
+    const { duration, revealMs, cover } = splat;
     const M = 16; // keep the whole splat inside the board with this margin
-    const LOBE = 1.28, EX_TOP = 1.3, EX_BOT = 1.55; // shape reach factors (see genSplatBlobs)
+    const LOBE = 1.28;
     const { cellW, fontSize, startX, yc } = cellGeom(n);
 
+    // Generously over-cover the glyph row (spans yc ± fontSize/2) so it can sit a
+    // little high and slowly droop down without ever exposing the letters.
     let halfW = (cover * cellW) / 2 + cellW * 0.06;
-    let halfH = fontSize * 0.55;
-    // Scale the splat down if it (with its lobes) would overflow the board width
-    // — the dominant constraint for long words. Keeps it inside the canvas.
+    let halfH = fontSize * 0.85;
     const maxHalfW = (W - 2 * M) / (2 * LOBE * 1.08); // 1.08 leaves room for the reveal overshoot
     if (halfW > maxHalfW) { const f = maxHalfW / halfW; halfW = maxHalfW; halfH *= f; }
-    const exX = halfW * LOBE, exTop = halfH * EX_TOP, exBot = halfH * EX_BOT;
+    const exX = halfW * LOBE, exBot = halfH * 1.2;
 
-    // Center, clamped so the shape's extents stay within [M, W-M] × [M, H-M].
+    const gh = fontSize * 0.5; // half the glyph height
+    // Start high: bottom of the mass just covers the glyph bottom + a little pad.
+    const startCenter = yc - (halfH - gh - fontSize * 0.12);
+    // Slow droop, capped so the glyph TOP stays covered AND it stays in the board.
+    const droopTotal = Math.max(0, Math.min(
+      fontSize * 0.5,
+      2 * halfH - 2 * gh - fontSize * 0.12, // keeps the top covered
+      (H - M) - exBot - startCenter // stays within the board bottom
+    ));
+
+    let scaleX = 1, alpha = 1;
+    if (t < revealMs) scaleX = Math.max(0.04, easeOutBack(t / revealMs)); // splatter spreads in
+    // Constant crawl downward from the end of the reveal to the end of the splat.
+    const dp = Math.max(0, Math.min(1, (t - revealMs) / Math.max(1, duration - revealMs)));
+    const yDroop = dp * droopTotal;
+    // Fade out only over the final stretch (still drooping while it fades).
+    const fadeMs = Math.min(500, duration * 0.2);
+    if (t > duration - fadeMs) alpha = Math.max(0, 1 - (t - (duration - fadeMs)) / fadeMs);
+
     const cx = Math.min(Math.max(startX + (cover * cellW) / 2, M + exX), W - M - exX);
-    const cy = Math.min(Math.max(yc, M + exTop), H - M - exBot);
-
-    let scaleX = 1, yOff = 0, alpha = 1;
-    if (t < revealMs) {
-      scaleX = Math.max(0.04, easeOutBack(t / revealMs)); // splatter spreads outward
-    } else if (t > duration - hideMs) {
-      const p = Math.min(1, (t - (duration - hideMs)) / hideMs);
-      const slideMax = Math.max(0, (H - M) - (cy + exBot)); // never slide past the bottom margin
-      yOff = easeInCubic(p) * slideMax; // slides down (bounded)
-      alpha = 1 - p; // and fades away
-    }
     c.save();
     c.globalAlpha = alpha;
-    c.translate(cx, cy + yOff);
+    c.translate(cx, startCenter + yDroop);
     c.scale(scaleX, 1);
     drawSplatShape(c, halfW, halfH, splat.blobs);
     c.restore();
