@@ -415,6 +415,49 @@ interface Line {
   underlineY?: number;
   strikeY?: number; // horizontal line through the glyphs (wrong-answer strikethrough)
   noReveal?: boolean; // always fully shown — exempt from the write-in/erase reveal
+  pill?: CanvasPattern | string; // rounded background behind the glyphs (the name pill)
+}
+
+// Rounded-rect (pill) path.
+function pillPath(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  r = Math.min(r, h / 2, w / 2);
+  c.beginPath();
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y, x + w, y + h, r);
+  c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r);
+  c.arcTo(x, y, x + w, y, r);
+  c.closePath();
+}
+
+// A reusable "coloured-in with chalk" fill: a base colour streaked with many
+// short translucent chalk strokes + grain. Generated ONCE (random at build time)
+// so it never flickers when the board re-renders.
+function makeChalkPattern(ctx: CanvasRenderingContext2D, base: string): CanvasPattern | string {
+  const t = document.createElement("canvas");
+  t.width = t.height = 180;
+  const c = t.getContext("2d")!;
+  c.fillStyle = base;
+  c.fillRect(0, 0, 180, 180);
+  c.lineCap = "round";
+  for (let i = 0; i < 260; i++) {
+    const x = Math.random() * 180, y = Math.random() * 180, len = 10 + Math.random() * 26;
+    const ang = (-32 + Math.random() * 16) * (Math.PI / 180); // mostly one diagonal
+    const light = Math.random() < 0.6;
+    c.strokeStyle = light
+      ? `rgba(255,252,225,${0.05 + Math.random() * 0.13})`
+      : `rgba(176,128,16,${0.05 + Math.random() * 0.11})`;
+    c.lineWidth = 1 + Math.random() * 2.6;
+    c.beginPath();
+    c.moveTo(x, y);
+    c.lineTo(x + Math.cos(ang) * len, y + Math.sin(ang) * len);
+    c.stroke();
+  }
+  for (let i = 0; i < 340; i++) {
+    c.fillStyle = Math.random() < 0.5 ? "rgba(255,252,228,0.12)" : "rgba(120,88,8,0.09)";
+    c.fillRect(Math.random() * 180, Math.random() * 180, 1.6, 1.6);
+  }
+  return ctx.createPattern(t, "repeat") ?? base;
 }
 interface Surface {
   tex: THREE.CanvasTexture;
@@ -449,6 +492,29 @@ function makeSurface(w: number, h: number): Surface {
     ctx.textAlign = "left";
     for (const line of lines) {
       const n = line.noReveal ? line.glyphs.length : Math.min(reveal, line.glyphs.length);
+      // Pill background (behind the glyphs), sized to the line's glyph bounds.
+      if (line.pill && n > 0) {
+        let minX = Infinity, maxX = -Infinity, fs = 40;
+        for (let i = 0; i < n; i++) {
+          const g = line.glyphs[i];
+          ctx.font = g.font;
+          minX = Math.min(minX, g.x);
+          maxX = Math.max(maxX, g.x + ctx.measureText(g.ch).width);
+          const m = /(\d+(?:\.\d+)?)px/.exec(g.font);
+          if (m) fs = parseFloat(m[1]);
+        }
+        const padX = fs * 0.55, padY = fs * 0.34;
+        const px = minX - padX, pw = maxX - minX + padX * 2, ph = fs + padY * 2;
+        const py = line.glyphs[0].y - ph / 2;
+        ctx.save();
+        ctx.shadowColor = "rgba(0,0,0,0.35)";
+        ctx.shadowBlur = 8;
+        ctx.shadowOffsetY = 3;
+        pillPath(ctx, px, py, pw, ph, ph / 2);
+        ctx.fillStyle = line.pill;
+        ctx.fill();
+        ctx.restore();
+      }
       ctx.shadowColor = "rgba(0,0,0,0.4)";
       ctx.shadowBlur = 5;
       for (let i = 0; i < n; i++) {
@@ -783,18 +849,20 @@ function makeStatsBoard(): StatsBoard {
   mesh.name = "StatsBoardText";
 
   let state: { name: string; wpm: number; acc: number } | null = null;
-  const line = (text: string, font: string, y: number, cx = W / 2, underline = false): Line => {
-    const glyphs = layoutCentered(ctx, [{ text, color: CHALK, font }], cx, y);
-    return underline ? { glyphs, underlineY: y + 38 } : { glyphs };
-  };
+  // Yellow "coloured-in with chalk" fill for the name pill (built once).
+  const namePill = makeChalkPattern(ctx, "#ffd23b");
+  const line = (text: string, font: string, y: number, cx = W / 2): Line => ({
+    glyphs: layoutCentered(ctx, [{ text, color: CHALK, font }], cx, y),
+  });
   const rebuild = () => {
     if (!state) return surf.setLines([]);
-    // Name on top (unchanged); WPM (left) + ACCURACY (right) share one line,
-    // smaller and high enough that the seated avatar doesn't cover them. WPM is
-    // sized for up to 3 digits without crowding the accuracy column.
+    // Name on top in BLACK on a chalk-filled yellow pill; WPM (left) + ACCURACY
+    // (right) share one line below, smaller and high enough that the seated
+    // avatar doesn't cover them. WPM is sized for up to 3 digits.
     const lx = W * 0.27, rx = W * 0.73;
+    const nameGlyphs = layoutCentered(ctx, [{ text: state.name, color: "#1b1b1b", font: `700 52px ${FONT}` }], W / 2, 80);
     surf.setLines([
-      line(state.name, `700 52px ${FONT}`, 70, W / 2, true),
+      { glyphs: nameGlyphs, pill: namePill },
       line(String(state.wpm), `700 76px ${FONT}`, 232, lx),
       line("WPM", `600 26px ${FONT}`, 292, lx),
       line(`${state.acc}%`, `700 76px ${FONT}`, 232, rx),
