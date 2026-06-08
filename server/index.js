@@ -5,10 +5,15 @@
 //   2. Run:  npm run server
 //
 import "dotenv/config";
+import path from "node:path";
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import express from "express";
 import { WebSocketServer } from "ws";
 import { createBee } from "./bee.js";
 import { previewMp3, setVoice } from "./tts.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 app.use(express.json());
@@ -58,6 +63,27 @@ app.get("/api/voice-preview", async (req, res) => {
     res.status(500).send(String(e.message || e));
   }
 });
+
+// --- Serve the built client (production / Railway) ---
+// In dev, Vite serves the client on :5173 and proxies /api + /ws here, so dist/
+// doesn't exist and this is skipped. In production the Node process serves the
+// built client too, keeping client + /api + /ws same-origin on one port (which
+// is what Discord's /.proxy mapping and Railway's single port both want).
+const distDir = path.resolve(__dirname, "../dist");
+if (fs.existsSync(distDir)) {
+  app.use(express.static(distDir));
+  // SPA fallback: any other GET (not /api, /ws, /healthz) returns index.html.
+  app.use((req, res, next) => {
+    if (req.method !== "GET") return next();
+    if (req.path.startsWith("/api") || req.path.startsWith("/ws") || req.path === "/healthz") {
+      return next();
+    }
+    res.sendFile(path.join(distDir, "index.html"));
+  });
+  console.log(`Serving built client from ${distDir}`);
+} else {
+  console.log("No dist/ found — dev mode (Vite serves the client on :5173).");
+}
 
 const server = app.listen(PORT, () => {
   console.log(`Token + room server listening on http://localhost:${PORT}`);

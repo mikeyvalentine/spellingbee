@@ -5,3 +5,8 @@ dist/
 .env.*.local
 *.log
 .DS_Store
+
+# Local, machine-specific tunnel launchers (paths hardcoded). Canonical commands
+# live in DEPLOY.md; ignore the convenience scripts so the repo stays portable.
+run-ngrok.cmd
+run-cloudflare.cmd
