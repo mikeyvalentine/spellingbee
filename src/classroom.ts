@@ -64,7 +64,7 @@ export interface Classroom {
   lights: RoomLights;
   boardMesh: THREE.Object3D; // the chalk-text plane (for pinning the Replay button)
   setBoardGuess(typed: string, length: number): void;
-  setBoardResult(word: string, correct: boolean): void;
+  setBoardResult(guess: string, correct: boolean, answer: string): void;
   clearBoard(length: number): void;
   setBoardHeader(text: string, accent?: { text: string; color: string } | null): void;
   /** Per-player stats on the secondary (left) board: name, WPM, accuracy %. */
@@ -414,6 +414,7 @@ interface Glyph {
 interface Line {
   glyphs: Glyph[];
   underlineY?: number;
+  strikeY?: number; // horizontal line through the glyphs (wrong-answer strikethrough)
 }
 interface Surface {
   tex: THREE.CanvasTexture;
@@ -466,6 +467,19 @@ function makeSurface(w: number, h: number): Surface {
         ctx.beginPath();
         ctx.moveTo(first.x, line.underlineY);
         ctx.lineTo(endX, line.underlineY);
+        ctx.stroke();
+      }
+      if (line.strikeY != null && n > 0) {
+        const first = line.glyphs[0];
+        const last = line.glyphs[n - 1];
+        ctx.font = last.font;
+        const endX = last.x + ctx.measureText(last.ch).width;
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = first.color;
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.moveTo(first.x, line.strikeY);
+        ctx.lineTo(endX, line.strikeY);
         ctx.stroke();
       }
     }
@@ -558,7 +572,7 @@ interface HeaderAccent {
 interface Chalkboard {
   mesh: THREE.Mesh;
   setGuess(typed: string, length: number): void;
-  setResult(word: string, correct: boolean): void;
+  setResult(guess: string, correct: boolean, answer: string): void;
   clear(length: number): void;
   setHeader(text: string, accent?: HeaderAccent | null): void;
   writeIn(onDone?: () => void): void;
@@ -585,6 +599,7 @@ function makeChalkboard(): Chalkboard {
   let cellsColor = "#f4f1e8";
   let splatCells: number[] = []; // tomato splats (from the server — everyone sees)
   let aimIndex: number | null = null; // local-only aiming highlight (the thrower)
+  let resultMode: { guess: string; correct: boolean; answer: string } | null = null;
 
   // Shared geometry for the word cells, so the glyph, the splat, the aim box, and
   // click hit-testing all line up exactly.
@@ -636,6 +651,26 @@ function makeChalkboard(): Chalkboard {
     }
   };
 
+  // A row of glyphs in fixed word-cell columns (n cells, padded with "_"), at a
+  // given baseline y + colour, optionally struck through.
+  const wordCellsLine = (text: string, color: string, y: number, n: number, strike: boolean): Line => {
+    const { cellW, fontSize, startX } = cellGeom(n);
+    const font = `700 ${fontSize}px ${FONT}`;
+    ctx.font = font;
+    const glyphs: Glyph[] = [];
+    for (let i = 0; i < n; i++) {
+      const ch = text[i] ?? "_";
+      glyphs.push({ ch, font, color, x: startX + i * cellW + cellW / 2 - ctx.measureText(ch).width / 2, y });
+    }
+    const line: Line = { glyphs };
+    if (strike) line.strikeY = y;
+    return line;
+  };
+  // The correct answer, smaller + centered, shown in chalk-white below a wrong guess.
+  const answerLine = (text: string, y: number): Line => ({
+    glyphs: layoutCentered(ctx, [{ text, color: CHALK, font: `600 60px ${FONT}` }], W / 2, y),
+  });
+
   const rebuild = () => {
     const lines: Line[] = [];
     if (header) {
@@ -645,7 +680,18 @@ function makeChalkboard(): Chalkboard {
       }
       lines.push({ glyphs: layoutCentered(ctx, segs, W / 2, 70) });
     }
-    if (cells.length) {
+    if (resultMode) {
+      const ans = resultMode.answer.toUpperCase();
+      if (resultMode.correct) {
+        lines.push(wordCellsLine(ans, "#9ff58a", H / 2 + 45, ans.length || 1, false));
+      } else {
+        // Their spelling, struck through in red; the correct answer below in white.
+        const g = (resultMode.guess || "").toUpperCase();
+        const n = ans.length || g.length || 1;
+        lines.push(wordCellsLine(g, "#ff8a8a", 222, n, true));
+        lines.push(answerLine(ans, 372));
+      }
+    } else if (cells.length) {
       const n = cells.length;
       const { cellW, fontSize, startX, yc } = cellGeom(n);
       const font = `700 ${fontSize}px ${FONT}`;
@@ -680,15 +726,17 @@ function makeChalkboard(): Chalkboard {
   };
 
   const setGuess = (typed: string, length: number) => {
+    resultMode = null; // typing always clears a prior result
     const t = typed.toUpperCase().slice(0, length);
     cells = [];
     for (let i = 0; i < length; i++) cells.push(t[i] ?? "_");
     cellsColor = "#f4f1e8";
     rebuild();
   };
-  const setResult = (word: string, correct: boolean) => {
-    cells = word.toUpperCase().split("");
-    cellsColor = correct ? "#9ff58a" : "#ff8a8a";
+  // Wrong: keep their `guess` (struck red) + the correct `answer` below in white.
+  // Correct: the answer in green.
+  const setResult = (guess: string, correct: boolean, answer: string) => {
+    resultMode = { guess, correct, answer };
     rebuild();
   };
   const clear = (length: number) => setGuess("", length);

@@ -537,7 +537,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
         classroom.setSplats([]); // turn over — clear the tomato splats
         cancelAim();
         updateTomatoBtn();
-        classroom.setBoardResult(m.word, m.correct);
+        classroom.setBoardResult(censor(m.guess || ""), m.correct, m.word);
         // Let the result word linger, then erase both boards char-by-char so
         // they're blank when the next speller's turn writes in.
         window.setTimeout(() => classroom.hideBoards(), 500);

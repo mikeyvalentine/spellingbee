@@ -450,6 +450,7 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
       correct,
       eliminated: !correct,
       alive: [...alive],
+      guess: (typeof text === "string" ? text : keyText) || "", // what they spelled
     });
     const multiplayer = order.length >= 2;
     const over = multiplayer ? alive.size <= 1 : alive.size === 0;
