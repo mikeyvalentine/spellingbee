@@ -105,7 +105,12 @@ export function setupLobby(opts: LobbyOpts): LobbyController {
   refreshBtn.addEventListener("click", refreshList);
 
   // ---- open / close the clipboard ----
-  const ndcOf = (e: PointerEvent) => [(e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1] as const;
+  // NDC relative to the canvas rect (mobile/Discord can offset it — window coords miss).
+  const sceneCanvas = document.getElementById("app") as HTMLCanvasElement;
+  const ndcOf = (e: PointerEvent) => {
+    const r = sceneCanvas.getBoundingClientRect();
+    return [((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1] as const;
+  };
   peekEl.addEventListener("click", () => clipboard.focus());
   closeBtn.addEventListener("click", () => clipboard.blur());
   window.addEventListener("pointermove", (e) => {

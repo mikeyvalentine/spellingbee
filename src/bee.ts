@@ -210,8 +210,13 @@ export function setupBee(opts: BeeOpts): BeeStage {
   const canChalk = () =>
     chalkVisible() && amSpeller && !answered && curLength > 0;
 
-  const ndcOf = (e: PointerEvent) =>
-    [(e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1] as const;
+  // NDC relative to the CANVAS rect (not the window) — on mobile/Discord the
+  // canvas may be offset by safe-area insets, so window-based coords miss the ray.
+  const sceneCanvas = document.getElementById("app") as HTMLCanvasElement;
+  const ndcOf = (e: PointerEvent) => {
+    const r = sceneCanvas.getBoundingClientRect();
+    return [((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1] as const;
+  };
 
   const updateTomatoBtn = () => {
     itemTomato.style.display = tomatoVisible() ? "" : "none";

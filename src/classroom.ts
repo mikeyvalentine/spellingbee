@@ -145,6 +145,8 @@ export async function loadClassroom(scene: THREE.Scene): Promise<Classroom> {
     setBoardAim: board.setAim,
     setBoardAimAll: board.setAimAll,
     boardSlotAt: (ndcX, ndcY, cam) => {
+      cam.updateMatrixWorld(); // fresh camera transform at tap time
+      board.mesh.updateWorldMatrix(true, false);
       boardRay.setFromCamera(boardNdc.set(ndcX, ndcY), cam);
       const hit = boardRay.intersectObject(board.mesh, false)[0];
       if (!hit || !hit.uv) return -1;

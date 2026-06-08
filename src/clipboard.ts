@@ -126,6 +126,8 @@ export function makeClipboard(camera: THREE.PerspectiveCamera): ClipboardView {
 
   const hitTest = (ndcX: number, ndcY: number) => {
     if (!visible) return false;
+    camera.updateMatrixWorld(); // fresh camera transform at tap time
+    group.updateMatrixWorld(true);
     ndc.set(ndcX, ndcY);
     ray.setFromCamera(ndc, camera);
     return ray.intersectObject(group, true).length > 0;
