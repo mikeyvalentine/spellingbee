@@ -80,6 +80,12 @@ export function setupBee(opts: BeeOpts): BeeStage {
   let timerRaf = 0;
   let lastAudioRound = -1;
 
+  // ---- tomato power-up ----
+  let aliveIds: string[] = []; // current alive players (from bee_turn / result)
+  let tomatoUsedThisTurn = false; // one throw per opponent's turn
+  let aiming = false; // currently picking a target cell
+  let aimIndex = 0; // highlighted cell while aiming
+
   classroom.root.visible = true; // the 3D room is shown in both lobby and match now
 
   // Spectator banner (shown when watching a match you're not playing in).
@@ -111,6 +117,83 @@ export function setupBee(opts: BeeOpts): BeeStage {
     if (lastBuffer) playBuffer(lastBuffer);
   });
   document.body.appendChild(boardReplay);
+
+  // ---- tomato power-up: throw at the speller's word to splat 3 cells ----
+  // Available to active (alive, non-speller, non-spectator) players, once per turn.
+  const tomatoBtn = document.createElement("button");
+  tomatoBtn.id = "tomato-btn";
+  tomatoBtn.title = "Throw a tomato — click, then pick a letter (←/→ + Enter, or click the board)";
+  document.body.appendChild(tomatoBtn);
+
+  const canThrow = () =>
+    phase === "match" && !amSpeller && !amSpectator && aliveIds.includes(localId) && !tomatoUsedThisTurn;
+
+  const cancelAim = () => {
+    if (!aiming) return;
+    aiming = false;
+    tomatoBtn.classList.remove("aiming");
+    classroom.setAim(null);
+  };
+  const startAim = () => {
+    if (!canThrow() || curLength <= 0) return;
+    aiming = true;
+    aimIndex = 0; // start at the first cell, per spec
+    tomatoBtn.classList.add("aiming");
+    classroom.setAim(aimIndex);
+  };
+  const doThrow = (cell: number) => {
+    if (!aiming || !canThrow()) return;
+    net.sendBee({ type: "bee_tomato", cell });
+    tomatoUsedThisTurn = true;
+    cancelAim();
+    updateTomatoBtn();
+  };
+  const updateTomatoBtn = () => {
+    const show = canThrow();
+    tomatoBtn.style.display = show ? "block" : "none";
+    if (!show) cancelAim();
+  };
+  tomatoBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (aiming) cancelAim();
+    else startAim();
+  });
+
+  // Aiming keys (waiting player only — the speller's keys never reach here).
+  window.addEventListener("keydown", (e) => {
+    if (!aiming) return;
+    if (e.key === "ArrowLeft") {
+      aimIndex = Math.max(0, aimIndex - 1);
+      classroom.setAim(aimIndex);
+      e.preventDefault();
+    } else if (e.key === "ArrowRight") {
+      aimIndex = Math.min(curLength - 1, aimIndex + 1);
+      classroom.setAim(aimIndex);
+      e.preventDefault();
+    } else if (e.key === "Enter") {
+      doThrow(aimIndex);
+      e.preventDefault();
+    } else if (e.key === "Escape") {
+      cancelAim();
+      e.preventDefault();
+    }
+  });
+
+  // Click/tap a chalkboard cell to throw there (raycast onto the board plane).
+  const aimRay = new THREE.Raycaster();
+  const aimNdc = new THREE.Vector2();
+  window.addEventListener("pointerdown", (e) => {
+    if (!aiming) return;
+    if ((e.target as HTMLElement)?.id === "tomato-btn") return; // the button toggles itself
+    aimNdc.x = (e.clientX / window.innerWidth) * 2 - 1;
+    aimNdc.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    aimRay.setFromCamera(aimNdc, camera);
+    const hit = aimRay.intersectObject(classroom.boardMesh, false)[0];
+    if (hit?.uv) {
+      const cell = classroom.boardCellFromUV(hit.uv.x, hit.uv.y);
+      if (cell != null) doThrow(cell);
+    }
+  });
 
   // ---------- audio (server-synthesized narration) ----------
   let audioCtx: AudioContext | null = null;
@@ -246,7 +329,10 @@ export function setupBee(opts: BeeOpts): BeeStage {
     classroom.root.visible = true;
     boardReplay.style.display = "none";
     classroom.clearStats();
+    classroom.setSplats([]);
+    aliveIds = [];
     updateMatchHud();
+    updateTomatoBtn();
     seatPlayers();
   };
 
@@ -259,7 +345,9 @@ export function setupBee(opts: BeeOpts): BeeStage {
     classroom.root.visible = true;
     classroom.setBoardHeader("🐝 Spelling Bee");
     classroom.clearBoard(0);
+    classroom.setSplats([]);
     updateMatchHud(); // desktop: hidden · touch: slim bottom bar
+    updateTomatoBtn();
     seatPlayers();
   };
 
@@ -370,6 +458,10 @@ export function setupBee(opts: BeeOpts): BeeStage {
         enterMatch(m.order ?? []);
         break;
 
+      case "bee_splat":
+        classroom.setSplats(m.cells ?? []); // a tomato landed — splat the cells
+        break;
+
       case "bee_turn": {
         activeSpeller = m.spellerId;
         curLength = m.length;
@@ -380,6 +472,10 @@ export function setupBee(opts: BeeOpts): BeeStage {
         answered = false;
         typed = ""; // fresh guess; typing is captured globally (no click needed)
         lastBuffer = null; // word audio arrives via bee_audio
+        aliveIds = m.alive ?? aliveIds;
+        tomatoUsedThisTurn = false; // fresh tomato for this opponent's turn
+        classroom.setSplats([]); // clear last turn's splats
+        cancelAim();
         seatPlayers();
         // Secondary board: current speller's name + (cumulative) accuracy, WPM resets.
         classroom.setStats(getName(m.spellerId), 0, m.accuracy ?? 100);
@@ -399,6 +495,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
         aliveEl.textContent = "";
         timerbar.style.width = "100%";
         updateMatchHud(); // (re)show the slim bar on touch; toggles the input row
+        updateTomatoBtn(); // show the tomato to eligible waiting players
         // Raise the native keyboard for the speller on touch devices.
         if (isTouch && amSpeller) input.focus();
         break;
@@ -436,6 +533,10 @@ export function setupBee(opts: BeeOpts): BeeStage {
         answered = true; // turn resolved — close the touch input row + keyboard
         updateMatchHud();
         if (isTouch) input.blur();
+        aliveIds = m.alive ?? aliveIds;
+        classroom.setSplats([]); // turn over — clear the tomato splats
+        cancelAim();
+        updateTomatoBtn();
         classroom.setBoardResult(m.word, m.correct);
         // Let the result word linger, then erase both boards char-by-char so
         // they're blank when the next speller's turn writes in.
@@ -470,7 +571,10 @@ export function setupBee(opts: BeeOpts): BeeStage {
         classroom.setBoardHeader(w ? `🏆 ${getName(w)} wins!` : "Game over");
         classroom.clearStats();
         answered = true;
+        aliveIds = [];
+        classroom.setSplats([]);
         updateMatchHud();
+        updateTomatoBtn();
         if (isTouch) input.blur();
         specBanner.style.display = "none";
         // The server reopens the lobby itself a few seconds later (returnToLobby).

@@ -167,6 +167,23 @@
       #m-status { margin-top: 9px; min-height: 1.2em; font-size: 14px; }
       #m-alive { font-size: 12px; color: var(--muted); margin-top: 2px; }
 
+      /* ---------- Tomato power-up button (placeholder red sphere) ---------- */
+      #tomato-btn {
+        position: fixed; right: 18px; bottom: 18px; z-index: 17; display: none;
+        width: 66px; height: 66px; border-radius: 50%; border: 3px solid #fff;
+        background: radial-gradient(circle at 34% 30%, #ff7a6b 0%, #e02c2c 55%, #b01818 100%);
+        box-shadow: 0 6px 18px rgba(0,0,0,0.5); cursor: pointer; padding: 0;
+        transition: transform 0.08s, filter 0.12s;
+      }
+      #tomato-btn:hover { filter: brightness(1.08); }
+      #tomato-btn:active { transform: translateY(1px); }
+      #tomato-btn.aiming {
+        outline: 3px solid var(--bee); outline-offset: 3px;
+        animation: tomato-pulse 0.9s ease-in-out infinite;
+      }
+      @keyframes tomato-pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+      @media (max-height: 480px) { #tomato-btn { width: 52px; height: 52px; bottom: 74px; } }
+
       /* ---------- Rotate-to-landscape nudge (touch + portrait only) ---------- */
       #rotate-nudge {
         position: fixed; inset: 0; z-index: 60; display: none;

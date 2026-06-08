@@ -74,6 +74,12 @@ export interface Classroom {
   revealBoards(): void;
   /** Erase both boards, one char at a time (during the result pause). */
   hideBoards(onDone?: () => void): void;
+  /** Tomato splats on the word cells (server-driven; shared by all viewers). */
+  setSplats(cells: number[]): void;
+  /** Local-only aiming highlight (target ± 1) while throwing a tomato. */
+  setAim(index: number | null): void;
+  /** Map a board-plane UV hit (from a raycast) to a word-cell index. */
+  boardCellFromUV(u: number, v: number): number | null;
 }
 
 const norm = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -117,6 +123,9 @@ export async function loadClassroom(scene: THREE.Scene): Promise<Classroom> {
       stats.eraseOut();
       board.eraseOut(onDone);
     },
+    setSplats: board.setSplats,
+    setAim: board.setAim,
+    boardCellFromUV: board.cellFromUV,
   };
 }
 
@@ -412,6 +421,9 @@ interface Surface {
   setLines(lines: Line[]): void; // set content, fully shown
   writeIn(onDone?: () => void): void;
   eraseOut(onDone?: () => void): void;
+  /** Overlay drawn on top of the glyphs every frame (tomato splats + aim box). */
+  setAfterDraw(fn: ((ctx: CanvasRenderingContext2D) => void) | null): void;
+  redraw(): void;
 }
 
 function makeSurface(w: number, h: number): Surface {
@@ -426,6 +438,7 @@ function makeSurface(w: number, h: number): Surface {
   let lines: Line[] = [];
   let reveal = Infinity; // chars shown per line = min(reveal, line length)
   let raf = 0;
+  let afterDraw: ((ctx: CanvasRenderingContext2D) => void) | null = null;
   const maxLen = () => lines.reduce((m, l) => Math.max(m, l.glyphs.length), 0);
 
   const draw = () => {
@@ -457,6 +470,7 @@ function makeSurface(w: number, h: number): Surface {
       }
     }
     ctx.shadowBlur = 0;
+    if (afterDraw) afterDraw(ctx);
     tex.needsUpdate = true;
   };
 
@@ -501,6 +515,11 @@ function makeSurface(w: number, h: number): Surface {
     eraseOut(onDone) {
       run(maxLen(), 0, onDone);
     },
+    setAfterDraw(fn) {
+      afterDraw = fn;
+      draw();
+    },
+    redraw: draw,
   };
 }
 
@@ -544,6 +563,9 @@ interface Chalkboard {
   setHeader(text: string, accent?: HeaderAccent | null): void;
   writeIn(onDone?: () => void): void;
   eraseOut(onDone?: () => void): void;
+  setSplats(cells: number[]): void; // tomato splats (server-driven)
+  setAim(index: number | null): void; // local aiming highlight
+  cellFromUV(u: number, v: number): number | null; // raycast hit -> cell index
 }
 
 function makeChalkboard(): Chalkboard {
@@ -561,6 +583,58 @@ function makeChalkboard(): Chalkboard {
   let headerAccent: HeaderAccent | null = null;
   let cells: string[] = [];
   let cellsColor = "#f4f1e8";
+  let splatCells: number[] = []; // tomato splats (from the server — everyone sees)
+  let aimIndex: number | null = null; // local-only aiming highlight (the thrower)
+
+  // Shared geometry for the word cells, so the glyph, the splat, the aim box, and
+  // click hit-testing all line up exactly.
+  const cellGeom = (n: number) => {
+    const cellW = Math.min(120, 900 / n);
+    const fontSize = Math.min(150, cellW * 1.3);
+    const startX = W / 2 - (cellW * n) / 2;
+    const yc = H / 2 + 45; // glyph vertical centre
+    return { cellW, fontSize, startX, yc };
+  };
+  const cellBox = (i: number, n: number) => {
+    const { cellW, fontSize, startX, yc } = cellGeom(n);
+    const h = fontSize * 1.2;
+    return { x: startX + i * cellW, y: yc - h / 2, w: cellW, h };
+  };
+
+  const drawSplat = (c: CanvasRenderingContext2D, b: { x: number; y: number; w: number; h: number }) => {
+    const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+    const r = Math.max(b.w, b.h) * 0.6;
+    c.save();
+    c.fillStyle = "rgba(190,28,28,0.96)";
+    const blobs = [[0, 0, r], [-r * 0.5, -r * 0.3, r * 0.55], [r * 0.5, r * 0.35, r * 0.5], [r * 0.35, -r * 0.5, r * 0.4], [-r * 0.4, r * 0.45, r * 0.42]];
+    for (const [dx, dy, rad] of blobs) { c.beginPath(); c.arc(cx + dx, cy + dy, rad, 0, Math.PI * 2); c.fill(); }
+    c.fillStyle = "rgba(140,18,18,0.97)";
+    c.beginPath(); c.arc(cx, cy, r * 0.55, 0, Math.PI * 2); c.fill();
+    c.restore();
+  };
+
+  // Drawn on top of the glyphs every frame: server splats (opaque) + the local
+  // aim highlight (target ± 1, clamped).
+  const drawOverlay = (c: CanvasRenderingContext2D) => {
+    const n = cells.length;
+    if (!n) return;
+    for (const i of splatCells) {
+      if (i >= 0 && i < n) drawSplat(c, cellBox(i, n));
+    }
+    if (aimIndex != null) {
+      const lo = Math.max(0, aimIndex - 1), hi = Math.min(n - 1, aimIndex + 1);
+      c.save();
+      c.strokeStyle = "rgba(255,72,60,0.95)";
+      c.lineWidth = 5;
+      c.shadowColor = "rgba(255,40,30,0.75)";
+      c.shadowBlur = 12;
+      for (let i = lo; i <= hi; i++) {
+        const b = cellBox(i, n);
+        c.strokeRect(b.x + 3, b.y + 3, b.w - 6, b.h - 6);
+      }
+      c.restore();
+    }
+  };
 
   const rebuild = () => {
     const lines: Line[] = [];
@@ -573,22 +647,36 @@ function makeChalkboard(): Chalkboard {
     }
     if (cells.length) {
       const n = cells.length;
-      const cellW = Math.min(120, 900 / n);
-      const fontSize = Math.min(150, cellW * 1.3);
-      const startX = W / 2 - (cellW * n) / 2;
+      const { cellW, fontSize, startX, yc } = cellGeom(n);
       const font = `700 ${fontSize}px ${FONT}`;
-      const y = H / 2 + 45;
       ctx.font = font;
       const glyphs: Glyph[] = cells.map((ch, i) => ({
         ch,
         font,
         color: cellsColor,
         x: startX + i * cellW + cellW / 2 - ctx.measureText(ch).width / 2,
-        y,
+        y: yc,
       }));
       lines.push({ glyphs });
     }
     surf.setLines(lines);
+  };
+
+  surf.setAfterDraw(drawOverlay);
+
+  const setSplats = (arr: number[]) => { splatCells = arr.slice(); surf.redraw(); };
+  const setAim = (idx: number | null) => { aimIndex = idx; surf.redraw(); };
+  // Map a board UV hit (from a raycast) to a word-cell index, or null if the
+  // click missed the word row.
+  const cellFromUV = (u: number, v: number): number | null => {
+    const n = cells.length;
+    if (!n) return null;
+    const x = u * W, y = (1 - v) * H; // CanvasTexture flipY: v=1 is the canvas top
+    const { cellW, fontSize, startX, yc } = cellGeom(n);
+    const h = fontSize * 1.3;
+    if (y < yc - h / 2 || y > yc + h / 2) return null;
+    const i = Math.floor((x - startX) / cellW);
+    return i >= 0 && i < n ? i : null;
   };
 
   const setGuess = (typed: string, length: number) => {
@@ -613,7 +701,11 @@ function makeChalkboard(): Chalkboard {
   setGuess("", 0);
   if (document.fonts) document.fonts.ready.then(() => rebuild()).catch(() => {});
 
-  return { mesh, setGuess, setResult, clear, setHeader, writeIn: surf.writeIn, eraseOut: surf.eraseOut };
+  return {
+    mesh, setGuess, setResult, clear, setHeader,
+    writeIn: surf.writeIn, eraseOut: surf.eraseOut,
+    setSplats, setAim, cellFromUV,
+  };
 }
 
 // ---------------------------------------------------------------------------
