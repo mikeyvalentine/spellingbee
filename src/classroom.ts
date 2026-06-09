@@ -1080,7 +1080,7 @@ function makeChalkboard(): Chalkboard {
     const frac = Math.max(0, Math.min(1, 1 - (performance.now() - timerStart) / timerDur));
     const { cellW, fontSize, startX, yc } = cellGeom(n);
     const bx = startX, bw = cellW * n;
-    const by = yc + fontSize * 0.6 + 10, bh = 14;
+    const by = yc + fontSize * 0.8 + 14, bh = 14; // dropped lower, clear of the word
     c.save();
     c.fillStyle = "rgba(0,0,0,0.34)"; // track
     pillPath(c, bx, by, bw, bh, bh / 2);
