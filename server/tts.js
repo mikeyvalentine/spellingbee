@@ -18,7 +18,7 @@ const cache = new Map(); // word -> { wav, ms, wavWord }
 
 const LANG = "en-US";
 let RATE = Number(ENV.GOOGLE_TTS_RATE || 0.9); // a touch slow for clarity
-let currentVoice = ENV.GOOGLE_TTS_VOICE || "en-US-Neural2-J";
+let currentVoice = ENV.GOOGLE_TTS_VOICE || "en-US-Wavenet-D";
 let apiKey = ENV.GOOGLE_TTS_API_KEY || "";
 
 // Set credentials/voice/rate at runtime (used by the Cloudflare Worker, which
@@ -39,6 +39,11 @@ export const setVoice = (v) => {
   }
 };
 
+// Running tally of input characters sent to Google (≈ what they bill), per
+// isolate. The DO/worker flush the delta to the Matchmaker for a global total.
+let ttsChars = 0;
+export const getTtsChars = () => ttsChars;
+
 async function gtts(text, voice = currentVoice) {
   if (!apiKey) throw new Error("GOOGLE_TTS_API_KEY is not set");
   const lang = voice.split("-").slice(0, 2).join("-") || LANG; // e.g. en-GB-Neural2-A -> en-GB
@@ -57,6 +62,7 @@ async function gtts(text, voice = currentVoice) {
   if (!res.ok) {
     throw new Error(`Google TTS ${res.status}: ${(await res.text()).slice(0, 300)}`);
   }
+  ttsChars += text.length; // billed on a successful synthesize
   const data = await res.json();
   if (!data.audioContent) throw new Error("Google TTS: empty audioContent");
   return data.audioContent; // base64 MP3

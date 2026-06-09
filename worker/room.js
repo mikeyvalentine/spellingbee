@@ -11,7 +11,7 @@
 //   call:<instanceId>  private room for one Discord call (host-started)
 //   pub:<code>         public matchmaking room (auto-start, reports to Matchmaker)
 import { createBee } from "../server/bee.js";
-import { configureTts } from "../server/tts.js";
+import { configureTts, getTtsChars } from "../server/tts.js";
 
 const HEARTBEAT_MS = 15_000;
 
@@ -32,6 +32,7 @@ export class BeeRoom {
     this.roomId = null;
     this.phase = "idle"; // tracked from broadcasts, reported to the Matchmaker
     this.heartbeat = null;
+    this.lastTtsFlush = 0; // chars already reported to the global TTS counter
   }
 
   ensureBee(roomKey) {
@@ -47,9 +48,25 @@ export class BeeRoom {
       () => [...this.players.values()].map((p) => p.id).filter(Boolean),
       { autoStart: this.isPublic, minPlayers: 2 }
     );
-    if (this.isPublic && !this.heartbeat) {
-      this.heartbeat = setInterval(() => this.report(), HEARTBEAT_MS);
+    // Heartbeat for every room (not just public): public rooms re-report their
+    // status; all rooms flush their TTS char usage to the global counter.
+    if (!this.heartbeat) {
+      this.heartbeat = setInterval(() => { this.report(); this.flushTts(); }, HEARTBEAT_MS);
     }
+  }
+
+  // Send this isolate's new TTS character usage to the Matchmaker's running total.
+  flushTts() {
+    const total = getTtsChars();
+    const delta = total - this.lastTtsFlush;
+    if (delta <= 0) return;
+    this.lastTtsFlush = total;
+    const stub = this.env.MATCHMAKER.get(this.env.MATCHMAKER.idFromName("global"));
+    stub.fetch(new Request("https://mm/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chars: delta }),
+    })).catch(() => {});
   }
 
   playerCount() {
@@ -169,6 +186,7 @@ export class BeeRoom {
       this.broadcast({ type: "leave", id: p.id });
       this.bee.removePlayer(p.id);
       this.report(); // player count changed
+      this.flushTts(); // capture usage before a possible eviction
     }
   }
 }

@@ -34,5 +34,5 @@ new_sqlite_classes = ["Matchmaker"]
 # here; set them with `wrangler secret put <NAME>` (or .dev.vars for local dev).
 [vars]
 DISCORD_CLIENT_ID = "1513352712400404520"
-GOOGLE_TTS_VOICE = "en-US-Neural2-J"
+GOOGLE_TTS_VOICE = "en-US-Wavenet-D"
 GOOGLE_TTS_RATE = "0.9"

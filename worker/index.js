@@ -8,12 +8,27 @@
 // run_worker_first = true (wrangler.toml) means this Worker sees every request;
 // non-API paths fall through to env.ASSETS.fetch(), which serves dist/ and does
 // the SPA index.html fallback.
-import { configureTts, previewMp3, setVoice } from "../server/tts.js";
+import { configureTts, previewMp3, setVoice, getTtsChars } from "../server/tts.js";
 
 export { BeeRoom } from "./room.js";
 export { Matchmaker } from "./matchmaker.js";
 
 const mm = (env) => env.MATCHMAKER.get(env.MATCHMAKER.idFromName("global"));
+
+// Flush this (worker) isolate's new TTS chars — e.g. from the voice preview — to
+// the global counter so debug previews are counted too.
+let lastWorkerTts = 0;
+function flushWorkerTts(env) {
+  const total = getTtsChars();
+  const delta = total - lastWorkerTts;
+  if (delta <= 0) return;
+  lastWorkerTts = total;
+  mm(env).fetch(new Request("https://mm/tts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chars: delta }),
+  })).catch(() => {});
+}
 
 // Keep room names bounded + predictable (idFromName accepts anything, but we
 // don't want unbounded/garbage keys). Falls back to one shared default room.
@@ -53,6 +68,7 @@ async function handleVoicePreview(url, env) {
   configureTts({ apiKey: env.GOOGLE_TTS_API_KEY, rate: env.GOOGLE_TTS_RATE });
   try {
     const b64 = await previewMp3("Your word is, lagoon.", voice);
+    flushWorkerTts(env); // count preview chars toward usage
     if (url.searchParams.get("set") === "1") setVoice(voice);
     const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
     return new Response(bytes, { headers: { "Content-Type": "audio/mpeg" } });
@@ -74,6 +90,7 @@ export default {
     if (p === "/api/mm/quick") return mm(env).fetch(new Request("https://mm/quick"));
     if (p === "/api/mm/create") return mm(env).fetch(new Request("https://mm/create"));
     if (p === "/api/mm/list") return mm(env).fetch(new Request("https://mm/list"));
+    if (p === "/api/tts-usage") return mm(env).fetch(new Request("https://mm/usage"));
 
     if (p === "/ws") {
       // Route to the requested room: `call:<instanceId>` (private per Discord

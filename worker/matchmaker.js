@@ -33,6 +33,18 @@ export class Matchmaker {
     const url = new URL(request.url);
     const now = Date.now();
 
+    // A room flushes its TTS character delta: { chars }. Accumulated in storage.
+    if (url.pathname === "/tts" && request.method === "POST") {
+      const { chars } = await request.json();
+      const n = Number(chars) || 0;
+      if (n > 0) await this.storage.put("ttsChars", ((await this.storage.get("ttsChars")) || 0) + n);
+      return Response.json({ ok: true });
+    }
+    // Global TTS character usage (≈ Google-billed characters since first deploy).
+    if (url.pathname === "/usage") {
+      return Response.json({ chars: (await this.storage.get("ttsChars")) || 0 });
+    }
+
     // A room reports its status: { roomId, players, phase }.
     if (url.pathname === "/report" && request.method === "POST") {
       const { roomId, players, phase } = await request.json();
