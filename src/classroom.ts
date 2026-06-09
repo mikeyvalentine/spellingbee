@@ -300,32 +300,33 @@ function buildLights(root: THREE.Object3D, objs: Map<string, THREE.Object3D>): R
   const win = buildWindowLight(objs.get("doorwindowarealight"), isMobile);
   root.add(win);
 
-  // --- Vibe pass: extra accent lights for a moodier, more "lit" room. --------
-  // Desktop only — each is an extra forward light (and the spot a 2nd shadow
-  // pass); mobile already runs a lean lighting/shadow profile, so the accents
-  // would tank it. The warm color re-skin (front/back/window/exposure/bg) still
-  // applies on mobile. All tunable; intensities assume ACES + ~0.95 exposure.
-  let spot: THREE.SpotLight | undefined;
-  const accents: THREE.Light[] = [];
+  // --- Vibe pass: a hero speller spotlight + (desktop) extra accent lights. -----
+  // Hero spotlight: a warm cone on the active speller (always at SPELLER_POS). It
+  // originates from the desk lamp — the "sphere" placeholder mesh marks the bulb
+  // — so the lamp reads as the source. Enabled on BOTH platforms (one light); its
+  // shadow is desktop-only since mobile runs shadow-less. Falls back to overhead.
+  const spot = new THREE.SpotLight(0xffe1b0, 130, 26, Math.PI / 5, 0.5, 1.25);
+  const bulb = objs.get("sphere");
+  if (bulb) {
+    bulb.updateWorldMatrix(true, false);
+    bulb.getWorldPosition(spot.position);
+  } else {
+    spot.position.set(SPELLER_POS.x + 0.3, ceilY - 0.5, SPELLER_POS.z + 1.2);
+  }
+  spot.target.position.copy(SPELLER_POS); // still aimed at the player model
+  spot.castShadow = !isMobile;
   if (!isMobile) {
-    // Hero spotlight: a warm cone on the active speller (always at SPELLER_POS).
-    // It originates from the desk lamp — the "sphere" placeholder mesh marks the
-    // bulb — so the lamp reads as the source. Falls back to an overhead position.
-    spot = new THREE.SpotLight(0xffe1b0, 90, 24, Math.PI / 5, 0.55, 1.3);
-    const bulb = objs.get("sphere");
-    if (bulb) {
-      bulb.updateWorldMatrix(true, false);
-      bulb.getWorldPosition(spot.position);
-    } else {
-      spot.position.set(SPELLER_POS.x + 0.3, ceilY - 0.5, SPELLER_POS.z + 1.2);
-    }
-    spot.target.position.copy(SPELLER_POS); // still aimed at the player model
-    spot.castShadow = true;
     spot.shadow.mapSize.set(1024, 1024);
     spot.shadow.bias = -0.0006;
-    root.add(spot);
-    root.add(spot.target);
+  }
+  root.add(spot);
+  root.add(spot.target);
 
+  // The remaining accent lights are extra forward lights; keep them desktop-only
+  // (mobile already runs a lean lighting profile). The warm color re-skin still
+  // applies on mobile. All tunable; intensities assume ACES + ~0.95 exposure.
+  const accents: THREE.Light[] = [];
+  if (!isMobile) {
     // Cool counter-fill from high on the window wall. The warm/cool contrast is
     // what makes the room read "moody" instead of flat.
     const coolFill = new THREE.PointLight(0x5b7dff, 8, 18, 1.4);
