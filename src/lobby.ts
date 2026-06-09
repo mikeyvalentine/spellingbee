@@ -40,6 +40,7 @@ export function setupLobby(opts: LobbyOpts): LobbyController {
 
   const peekEl = $("clip-peek"), peekTextEl = $("clip-peek-text");
   const panelEl = $("clip-panel"), closeBtn = $("clip-close");
+  const tapzoneEl = $("clip-tapzone"), backdropEl = $("clip-backdrop");
   const roomEl = $("cp-room"), countEl = $("cp-count"), cdEl = $("cp-cd");
   const settingsEl = $("cp-settings"), modeSel = $("cp-mode") as HTMLSelectElement;
   const maxEl = $("cp-max"), maxDec = $("cp-max-dec") as HTMLButtonElement, maxInc = $("cp-max-inc") as HTMLButtonElement;
@@ -113,6 +114,10 @@ export function setupLobby(opts: LobbyOpts): LobbyController {
   };
   peekEl.addEventListener("click", () => clipboard.focus());
   closeBtn.addEventListener("click", () => clipboard.blur());
+  // DOM tap targets (work in webviews that swallow window touch events):
+  // the lower-screen tap-zone opens, the backdrop (behind the focused panel) closes.
+  tapzoneEl.addEventListener("click", () => clipboard.focus());
+  backdropEl.addEventListener("click", () => clipboard.blur());
   window.addEventListener("pointermove", (e) => {
     if (!shown || clipboard.isFocused()) { clipboard.setHover(false); peekEl.classList.remove("hot"); return; }
     // One combined hover zone: the peek strip OR the 3D clipboard raises both.
@@ -214,10 +219,22 @@ export function setupLobby(opts: LobbyOpts): LobbyController {
       clipboard.setVisible(false);
       panelEl.classList.remove("show");
       peekEl.classList.remove("show");
+      tapzoneEl.classList.remove("show");
+      backdropEl.classList.remove("show");
     },
     frame() {
-      if (!shown) { panelEl.classList.remove("show"); peekEl.classList.remove("show"); return; }
-      const r = clipboard.isFocused() ? clipboard.paperRect() : null;
+      if (!shown) {
+        panelEl.classList.remove("show");
+        peekEl.classList.remove("show");
+        tapzoneEl.classList.remove("show");
+        backdropEl.classList.remove("show");
+        return;
+      }
+      const focused = clipboard.isFocused();
+      // Mobile DOM tap targets: tap-zone opens (peek state), backdrop closes (focused).
+      tapzoneEl.classList.toggle("show", isTouch && !focused);
+      backdropEl.classList.toggle("show", isTouch && focused);
+      const r = focused ? clipboard.paperRect() : null;
       if (r) {
         panelEl.style.left = `${Math.round(r.x)}px`;
         panelEl.style.top = `${Math.round(r.y - 28)}px`;

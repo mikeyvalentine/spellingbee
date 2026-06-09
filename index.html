@@ -305,6 +305,12 @@
 
       #clip-panel { position: fixed; z-index: 21; display: none; flex-direction: column; }
       #clip-panel.show { display: flex; }
+      /* Invisible DOM tap targets (mobile): tap-zone over the lower screen opens the
+         clipboard; backdrop behind the focused panel closes it on tap-outside. */
+      #clip-tapzone { position: fixed; left: 0; right: 0; bottom: 0; height: 44%; z-index: 19; display: none; }
+      #clip-tapzone.show { display: block; }
+      #clip-backdrop { position: fixed; inset: 0; z-index: 20; display: none; }
+      #clip-backdrop.show { display: block; }
       /* The paper + clipboard appear together (instant); only the controls fade in. */
       @keyframes cp-content-in { from { opacity: 0; } to { opacity: 1; } }
       #clip-panel.show #clip-paper > *,
@@ -540,7 +546,11 @@
     <button id="kbd-replay" class="kbd-fab" title="Replay word">↺</button>
     <button id="kbd-submit" class="kbd-fab" title="Submit">✓</button>
 
-    <!-- Clipboard lobby: peek strip (bottom) + paper panel (overlays the 3D paper) -->
+    <!-- Clipboard lobby: peek strip (bottom) + paper panel (overlays the 3D paper).
+         The DOM tap-zone / backdrop make open+close work in webviews that swallow
+         window-level touch events (Discord mobile) — plain clicks still fire. -->
+    <div id="clip-tapzone" aria-hidden="true"></div>
+    <div id="clip-backdrop" aria-hidden="true"></div>
     <div id="clip-peek"><span id="clip-peek-text">Lobby</span><span class="cp-peek-hint">click to open</span></div>
     <div id="clip-panel">
       <button id="clip-close" title="Close">▾ close</button>

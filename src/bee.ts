@@ -257,19 +257,18 @@ export function setupBee(opts: BeeOpts): BeeStage {
     document.body.style.cursor = "";
   }
 
-  // Desktop: hovering narrows the pulse to the hovered slot (all slots when off
-  // the row); click confirms. Touch has no hover, so it's all in pointerdown.
-  window.addEventListener("pointermove", (e) => {
+  // These listen on the CANVAS (not window) — some webviews (Discord mobile)
+  // swallow window-level touch events, but the canvas under the finger still gets
+  // them. Desktop: hover narrows the pulse to the hovered slot; click confirms.
+  sceneCanvas.addEventListener("pointermove", (e) => {
     if (!chalkAiming || isTouch) return;
     const [x, y] = ndcOf(e);
     const idx = classroom.boardSlotAt(x, y, camera);
     classroom.setBoardAim(idx); // idx<0 clears the oval (no all-slots on desktop)
     document.body.style.cursor = idx >= 0 ? "pointer" : "crosshair";
   });
-  window.addEventListener("pointerdown", (e) => {
+  sceneCanvas.addEventListener("pointerdown", (e) => {
     if (!chalkAiming) return;
-    const t = e.target as HTMLElement;
-    if (t.closest && (t.closest("#item-menu") || t.closest("#kbd"))) return; // UI taps aren't aim picks
     const [x, y] = ndcOf(e);
     const idx = classroom.boardSlotAt(x, y, camera);
     if (isTouch) {
