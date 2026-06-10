@@ -2,7 +2,7 @@
 // A host opens a lobby; players join/ready; host starts. Each turn the next
 // queued player must spell a narrated word while everyone watches; a miss
 // eliminates them; last speller standing wins (solo = survival).
-import { english10, english20, english35, american10, american20, american35 } from "wordlist-js";
+import { english10, english20, american10, american20 } from "wordlist-js";
 import wotc from "./wotc.json" with { type: "json" };
 import { synth } from "./tts.js";
 
@@ -56,12 +56,12 @@ const MISPRONOUNCED = new Set([
 ]);
 const EXCLUDE = new Set([...HOMOPHONES, ...SWEARS, ...MISPRONOUNCED]);
 
-// Difficulty grading. Corpus frequency + length is a poor proxy for SPELLING
-// difficulty (long regular compounds like "newspaperwomen" are trivial to spell;
-// short foreign words like "seraglio" are brutal). So the hard tiers come from the
-// Scripps "Words of the Champions" list — 4,000 words human-graded by the National
-// Spelling Bee into One/Two/Three Bee — bundled as wotc.json. The easy/medium
-// tiers stay frequency-based for a large pool of common words in the early rounds.
+// Difficulty grading comes from the official Scripps "Words of the Champions"
+// list (wotc.json, built from the edition the host provided). IMPORTANT: the
+// official levels ramp UP — One Bee is the EASIEST (grades 1-3: "water",
+// "apple"), Two Bee is genuinely hard, Three Bee champions is brutal — so the
+// game tiers map medium→One Bee, hard→Two Bee, veryhard→Three Bee study list,
+// impossible→Three Bee champions. Easy stays frequency-based (everyday words).
 function freqPool(lists, min, max) {
   const set = new Set();
   for (const list of lists)
@@ -74,11 +74,11 @@ const wotcPool = (arr) =>
   arr.filter((w) => /^[a-z]+$/.test(w) && w.length >= 3 && w.length <= 20 && !EXCLUDE.has(w));
 
 const POOLS = {
-  easy:       freqPool([english10, english20, american10, american20], 4, 8), // commonest
-  medium:     freqPool([english35, american35], 4, 9),                        // common-ish
-  hard:       wotcPool(wotc.oneBee),   // Scripps WOTC · One Bee
-  veryhard:   wotcPool(wotc.twoBee),   // Scripps WOTC · Two Bee
-  impossible: wotcPool(wotc.threeBee), // Scripps WOTC · Three Bee
+  easy:       freqPool([english10, english20, american10, american20], 4, 8), // commonest everyday words
+  medium:     wotcPool(wotc.oneBee),        // Scripps One Bee (study + champions)
+  hard:       wotcPool(wotc.twoBee),        // Scripps Two Bee (study + champions)
+  veryhard:   wotcPool(wotc.threeBeeStudy), // Scripps Three Bee school study list
+  impossible: wotcPool(wotc.threeBee),      // Scripps Three Bee champions
 };
 
 // Difficulty ramps by ROUND (a lap = every alive player spelling once). Fixed
