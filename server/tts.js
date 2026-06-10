@@ -25,6 +25,9 @@ let apiKey = ENV.GOOGLE_TTS_API_KEY || "";
 let elevenKey = ENV.ELEVENLABS_API_KEY || "";
 let elevenVoiceId = ENV.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM"; // "Rachel" — clear default
 let elevenModel = ENV.ELEVENLABS_MODEL || "eleven_multilingual_v2"; // or eleven_flash_v2_5 (faster/cheaper)
+// Playback speed (0.7 slowest … 1.2 fastest; 1.0 = normal). Default a bit slow so
+// spellers can hear every syllable. Tunable via ELEVENLABS_SPEED.
+let elevenSpeed = ENV.ELEVENLABS_SPEED != null && ENV.ELEVENLABS_SPEED !== "" ? Number(ENV.ELEVENLABS_SPEED) : 0.8;
 // Up to 3 "<id>:<version>" pronunciation-dictionary locators to hard-fix words the
 // model mangles (comma-separated; version optional). e.g. "abc123,def456:7".
 let elevenPronos = ENV.ELEVENLABS_PRONO_DICTS || "";
@@ -45,7 +48,7 @@ const QWEN_MODEL = ENV.QWEN_TTS_MODEL || "fal-ai/qwen-3-tts/text-to-speech/1.7b"
 // passes its env bindings). Safe to call multiple times. Clears the audio cache
 // when anything affecting the rendered audio changes.
 export const configureTts = ({ apiKey: k, voice, rate, falKey: fk, qwenVoice: qv,
-  elevenKey: ek, elevenVoiceId: ev, elevenModel: em, elevenPronos: ep, provider } = {}) => {
+  elevenKey: ek, elevenVoiceId: ev, elevenModel: em, elevenSpeed: es, elevenPronos: ep, provider } = {}) => {
   if (k) apiKey = k;
   if (voice) currentVoice = voice;
   if (rate != null && rate !== "") RATE = Number(rate);
@@ -54,6 +57,7 @@ export const configureTts = ({ apiKey: k, voice, rate, falKey: fk, qwenVoice: qv
   if (ek && ek !== elevenKey) { elevenKey = ek; cache.clear(); }
   if (ev && ev !== elevenVoiceId) { elevenVoiceId = ev; cache.clear(); }
   if (em && em !== elevenModel) { elevenModel = em; cache.clear(); }
+  if (es != null && es !== "" && Number(es) !== elevenSpeed) { elevenSpeed = Number(es); cache.clear(); }
   if (ep != null && ep !== elevenPronos) { elevenPronos = ep; cache.clear(); }
   if (provider != null && provider !== "") providerOverride = String(provider).toLowerCase();
 };
@@ -113,7 +117,7 @@ async function eltts(text, voiceId = elevenVoiceId) {
   const body = {
     text,
     model_id: elevenModel,
-    voice_settings: { stability: 0.5, similarity_boost: 0.75, speed: Math.max(0.7, Math.min(1.2, RATE)) },
+    voice_settings: { stability: 0.5, similarity_boost: 0.75, speed: Math.max(0.7, Math.min(1.2, elevenSpeed)) },
   };
   const locators = elevenPronos
     .split(",").map((s) => s.trim()).filter(Boolean)

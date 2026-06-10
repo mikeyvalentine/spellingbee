@@ -74,6 +74,7 @@ async function handleVoicePreview(url, env) {
     elevenKey: env.ELEVENLABS_API_KEY,
     elevenVoiceId: env.ELEVENLABS_VOICE_ID,
     elevenModel: env.ELEVENLABS_MODEL,
+    elevenSpeed: env.ELEVENLABS_SPEED,
     elevenPronos: env.ELEVENLABS_PRONO_DICTS,
   });
   try {
