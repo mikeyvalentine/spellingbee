@@ -621,6 +621,12 @@ function drawSplatShape(c: CanvasRenderingContext2D, halfW: number, halfH: numbe
     c.beginPath(); c.ellipse(s.x * halfW, s.y * halfH, Math.max(2, s.r * halfW * 0.5), Math.max(3, s.r * halfH), 0.5, 0, Math.PI * 2); c.fill();
   }
 }
+// Bee icon — drawn in place of the 🐝 emoji wherever it appears in chalk text
+// (e.g. the "🐝 Spelling Bee" board header). Falls back to the emoji glyph
+// until the SVG finishes loading.
+const BEE_ICON = new Image();
+BEE_ICON.src = "/assets/bee.svg";
+
 interface Surface {
   tex: THREE.CanvasTexture;
   ctx: CanvasRenderingContext2D;
@@ -683,7 +689,14 @@ function makeSurface(w: number, h: number): Surface {
         const g = line.glyphs[i];
         ctx.font = g.font;
         ctx.fillStyle = g.color;
-        ctx.fillText(g.ch, g.x, g.y);
+        if (g.ch === "🐝" && BEE_ICON.complete && BEE_ICON.naturalWidth) {
+          // Swap the emoji for the bee SVG, sized to the glyph's font box.
+          const m = /(\d+(?:\.\d+)?)px/.exec(g.font);
+          const fs = m ? parseFloat(m[1]) : 40;
+          ctx.drawImage(BEE_ICON, g.x, g.y - fs * 0.52, fs * 1.04, fs * 1.04);
+        } else {
+          ctx.fillText(g.ch, g.x, g.y);
+        }
       }
       if (line.underlineY != null && n > 0) {
         const first = line.glyphs[0];
