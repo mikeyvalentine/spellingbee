@@ -487,6 +487,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
   const enterLobby = (queue: string[]) => {
     phase = "lobby";
     matchOver = false;
+    lastAudioRound = -1; // reset the audio-dedup key between matches
     audio.setMusicEnabled(true); // background song plays in the lobby only
     cancelAnimationFrame(timerRaf);
     activeSpeller = null;
@@ -508,6 +509,8 @@ export function setupBee(opts: BeeOpts): BeeStage {
   const enterMatch = (order: string[]) => {
     phase = "match";
     matchOver = false;
+    lastAudioRound = -1; // the server resets its per-match round counter, so clear
+                         // our audio-dedup key or the next match's word goes silent
     audio.setMusicEnabled(false); // silence the lobby song during the match
     seatOrder = order.length ? order : seatOrder;
     amSpectator = order.length > 0 && !order.includes(localId);
