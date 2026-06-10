@@ -130,12 +130,15 @@ export function makeClipboard(camera: THREE.PerspectiveCamera): ClipboardView {
     computePose();
 
     // World matrix = camera world * local offset (anchors it to the view).
-    // Scaling pos + scale together about the camera origin preserves the exact
-    // screen projection at any FOV (only the irrelevant depth changes).
+    // FOV compensation: angular size on screen ∝ size/distance ÷ tan(fov/2), so
+    // shrink the SIZE and the lateral x/y offsets by the tan ratio while keeping
+    // the camera distance (z) unchanged.
     camera.updateMatrixWorld();
     const fovScale = Math.tan((camera.fov * Math.PI) / 360) / REF_TAN;
     const s = curScale * fovScale;
-    local.compose(curPos.multiplyScalar(fovScale), tmpQuat.setFromEuler(tmpEuler.set(curRotX, 0, 0)), tmpScale.set(s, s, s));
+    curPos.x *= fovScale;
+    curPos.y *= fovScale;
+    local.compose(curPos, tmpQuat.setFromEuler(tmpEuler.set(curRotX, 0, 0)), tmpScale.set(s, s, s));
     group.matrix.multiplyMatrices(camera.matrixWorld, local);
     group.matrixWorldNeedsUpdate = true;
   };
