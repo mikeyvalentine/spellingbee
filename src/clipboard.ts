@@ -28,8 +28,8 @@ export interface ClipboardView {
 const POSE = {
   // Negative rotX tilts the TOP away from the camera (leaning back). Focus faces
   // the camera flat (rotX 0) so the HTML paper lines up cleanly + larger.
-  peek: { pos: new THREE.Vector3(0, -1.62, -2.1), rotX: -0.32, scale: 1.0 },
-  hover: { pos: new THREE.Vector3(0, -1.42, -2.05), rotX: -0.26, scale: 1.02 },
+  peek: { pos: new THREE.Vector3(0, -1.82, -2.1), rotX: -0.32, scale: 1.0 },
+  hover: { pos: new THREE.Vector3(0, -1.62, -2.05), rotX: -0.26, scale: 1.02 },
   focus: { pos: new THREE.Vector3(0, -0.05, -1.28), rotX: 0.0, scale: 1.52 },
 };
 

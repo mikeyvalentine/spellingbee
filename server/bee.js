@@ -633,6 +633,14 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
             broadcast({ type: "bee_key", spellerId: speller, text: keyText, wpm: s.wpm, accuracy: s.accuracy });
           }
           break;
+        case "bee_look": {
+          // Gaze sync: relay where this player is looking so their avatar's head
+          // tracks it on other clients (client-throttled; clamped here).
+          const yaw = Math.max(-1.6, Math.min(1.6, Number(m.yaw) || 0));
+          const pitch = Math.max(-0.9, Math.min(0.9, Number(m.pitch) || 0));
+          broadcast({ type: "bee_look", id, yaw, pitch });
+          break;
+        }
         case "bee_answer":
           if (phase === "match" && id === speller && accepting && !answered) {
             answered = true;

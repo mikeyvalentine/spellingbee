@@ -703,6 +703,11 @@ export function setupBee(opts: BeeOpts): BeeStage {
         enterMatch(m.order ?? []);
         break;
 
+      case "bee_look":
+        // Another player's gaze — turn their avatar's head toward it.
+        if (m.id !== localId) avatars.setLook(m.id, m.yaw ?? 0, m.pitch ?? 0);
+        break;
+
       case "bee_splat": {
         const dur = m.durationMs ?? 4000;
         const onLand = () => classroom.splatTomato(dur); // splat appears when it lands
@@ -919,11 +924,11 @@ export function setupBee(opts: BeeOpts): BeeStage {
   const MAX_YAW = 0.045, MAX_PITCH = 0.03; // match cursor-look amounts (radians)
   const BOB_Y = 0.014, BOB_X = 0.008; // breathing translation (world units)
   const TURN_TILT = 0.16; // downward pitch on the speller's touch turn (radians)
-  // Lobby free-look range: cursor at the screen edge (or a full-width drag) = full
-  // sweep. Kept tight (~30% of a full sweep) so players glance around their seat
-  // rather than spin the room. Down gets a bit more travel than up.
-  const LOOK_YAW = 0.6; // radians (~34°) each way
-  const LOOK_PITCH_UP = 0.15, LOOK_PITCH_DOWN = 0.24;
+  // Free-look range: cursor at the screen edge (or a full-width drag) = full
+  // sweep. Wide enough to glance "over your shoulder" without spinning the room.
+  // Down gets a bit more travel than up.
+  const LOOK_YAW = 1.2; // radians (~69°) each way
+  const LOOK_PITCH_UP = 0.22, LOOK_PITCH_DOWN = 0.3;
   let lookTX = 0, lookTY = 0; // free-look target, -1..1 (touch drags write here)
   let lookX = 0, lookY = 0; // eased
   let lookGain = 1; // eases to 0 while the clipboard is up, so it reads calmly
@@ -960,6 +965,20 @@ export function setupBee(opts: BeeOpts): BeeStage {
     curMy += (targetMy - curMy) * Math.min(1, dt * 5);
     camera.rotateY(-curMx * MAX_YAW);
     camera.rotateX(-curMy * MAX_PITCH);
+  };
+
+  // Broadcast where this player is looking (throttled) so their avatar turns its
+  // head on other clients. Zeros flow once when free-look ends (e.g. on stage).
+  let sentYaw = 0, sentPitch = 0, lastLookAt = 0;
+  const sendLook = () => {
+    const now = performance.now();
+    if (now - lastLookAt < 150) return;
+    const active = !onMatchCam() && lookGain > 0.05;
+    const yaw = active ? -lookX * LOOK_YAW * lookGain : 0;
+    const pitch = active ? -lookY * (lookY > 0 ? LOOK_PITCH_DOWN : LOOK_PITCH_UP) * lookGain : 0;
+    if (Math.abs(yaw - sentYaw) < 0.02 && Math.abs(pitch - sentPitch) < 0.02) return;
+    sentYaw = yaw; sentPitch = pitch; lastLookAt = now;
+    net.sendBee({ type: "bee_look", yaw, pitch });
   };
 
   // Touch: a one-finger drag on the 3D scene looks around (whenever free-look is
@@ -1018,6 +1037,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
     update: (dt: number) => {
       applyCamera(basePose()); // per-player POV (host = front, others = their seat)
       applyCameraLife(dt); // lobby free-look · match bob + parallax
+      sendLook(); // throttled gaze sync — other clients turn this player's head
       tomato.update(dt); // advance any in-flight thrown tomatoes
 
       // Seats + speller are placed once by seatPlayers() on each state change; only
