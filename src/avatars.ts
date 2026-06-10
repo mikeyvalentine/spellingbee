@@ -58,6 +58,10 @@ interface ModelTemplate {
   offset: THREE.Vector3;
 }
 
+// Scratch for head-look rotation (avoid per-frame allocations).
+const _headEuler = new THREE.Euler();
+const _headQuat = new THREE.Quaternion();
+
 interface Avatar {
   root: THREE.Object3D;
   name: string;
@@ -90,6 +94,13 @@ interface Avatar {
   landDuration: number;
   posed: boolean; // locked to idle (seated / speller) — skip the locomotion state machine
   target?: { x: number; y: number; z: number; ry: number }; // networked remote target
+  headBone?: THREE.Object3D; // "Head" bone (gaze tracking); undefined if the rig lacks one
+  headRest?: THREE.Quaternion; // rest pose, restored when no clip animates the head
+  mixerWritesHead: boolean; // idle clip animates the head → offsets can't accumulate
+  lookYaw: number; // gaze target (radians, + = the avatar's left)
+  lookPitch: number; // gaze target (radians, + = up)
+  lookYawCur: number; // eased
+  lookPitchCur: number;
 }
 
 export class AvatarManager {
@@ -306,6 +317,17 @@ export class AvatarManager {
     actions.idle?.play();
     const landDuration = template.clips.jump_land?.duration ?? 0.3;
 
+    // Head bone for gaze tracking (these rigs name it "Head"). If the idle clip
+    // animates it, the mixer rewrites it every frame so look offsets can simply
+    // multiply on top; otherwise the captured rest pose is restored first.
+    let headBone: THREE.Object3D | undefined;
+    model.traverse((o) => {
+      if (!headBone && (o as THREE.Bone).isBone && /head/i.test(o.name)) headBone = o;
+    });
+    const mixerWritesHead = !!(
+      headBone && template.clips.idle?.tracks.some((tr) => /head/i.test(tr.name.split(".")[0]))
+    );
+
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(0.45, 0.6, 32),
       new THREE.MeshBasicMaterial({
@@ -348,6 +370,13 @@ export class AvatarManager {
       labelDesired: true,
       isHost: false,
       speakerIcon,
+      headBone,
+      headRest: headBone ? headBone.quaternion.clone() : undefined,
+      mixerWritesHead,
+      lookYaw: 0,
+      lookPitch: 0,
+      lookYawCur: 0,
+      lookPitchCur: 0,
       prevX: position.x,
       prevZ: position.z,
       prevY: position.y,
@@ -427,6 +456,26 @@ export class AvatarManager {
     return true;
   }
 
+  /** Loops the Wave clip indefinitely — the winner's celebration on the game-over
+   *  screen. Held until clearEmote()/seatPlayers() resets it. Returns false if the
+   *  model has no Wave clip so the caller can decide what to do. */
+  celebrate(id: string): boolean {
+    const a = this.avatars.get(id);
+    if (!a) return false;
+    const action = a.actions.wave;
+    if (!action) return false;
+    if (a.emote && a.emote !== "wave") a.actions[a.emote]?.stop();
+    if (a.state === "wave") a.state = "idle"; // force transitionTo to restart the clip
+    action.reset();
+    action.setEffectiveTimeScale(1);
+    action.setLoop(THREE.LoopRepeat, Infinity); // loop the wave for the whole end screen
+    a.emote = "wave";
+    a.emoteHold = false;
+    a.emoteHoldTime = Infinity;
+    a.emoteUntil = Infinity; // never auto-expire — runs until cleared
+    return true;
+  }
+
   /** Show/hide an avatar's floating nametag (the speller's is hidden mid-match). */
   setLabelVisible(id: string, visible: boolean): void {
     const a = this.avatars.get(id);
@@ -464,6 +513,38 @@ export class AvatarManager {
     a.emote = undefined;
     a.emoteHold = false;
     a.emoteHoldTime = Infinity;
+  }
+
+  /** Aim an avatar's head (radians, relative to its facing): yaw + = the
+   *  avatar's left, pitch + = up. Eased + applied over the animation each frame. */
+  setLook(id: string, yaw: number, pitch: number): void {
+    const a = this.avatars.get(id);
+    if (!a) return;
+    a.lookYaw = THREE.MathUtils.clamp(yaw || 0, -1.2, 1.2);
+    a.lookPitch = THREE.MathUtils.clamp(pitch || 0, -0.7, 0.7);
+  }
+
+  /** Eases the gaze and rotates the head bone on top of this frame's animation
+   *  pose — must run after mixer.update(). */
+  private applyHeadLook(a: Avatar, dt: number): void {
+    const hb = a.headBone;
+    if (!hb) return;
+    // Most avatars most of the time have no gaze offset — skip all the work.
+    if (a.lookYaw === 0 && a.lookPitch === 0 &&
+        Math.abs(a.lookYawCur) < 0.001 && Math.abs(a.lookPitchCur) < 0.001) {
+      a.lookYawCur = 0;
+      a.lookPitchCur = 0;
+      return;
+    }
+    const k = Math.min(1, dt * 10);
+    a.lookYawCur += (a.lookYaw - a.lookYawCur) * k;
+    a.lookPitchCur += (a.lookPitch - a.lookPitchCur) * k;
+    // Clips that animate the head rewrite the bone every frame, so the offset
+    // can't accumulate; otherwise restore the captured rest pose first.
+    if (!a.mixerWritesHead && a.headRest) hb.quaternion.copy(a.headRest);
+    if (Math.abs(a.lookYawCur) < 0.001 && Math.abs(a.lookPitchCur) < 0.001) return;
+    _headEuler.set(-a.lookPitchCur, a.lookYawCur, 0);
+    hb.quaternion.multiply(_headQuat.setFromEuler(_headEuler));
   }
 
   /** Freezes a held emote at its peak pose (called after the mixer advances). */
@@ -522,6 +603,7 @@ export class AvatarManager {
         this.transitionTo(a, a.emote ?? "idle");
         a.mixer.update(dt);
         this.freezeHeldEmote(a);
+        this.applyHeadLook(a, dt);
         continue;
       }
 
@@ -618,6 +700,7 @@ export class AvatarManager {
 
       a.mixer.update(dt);
       this.freezeHeldEmote(a);
+      this.applyHeadLook(a, dt);
 
       // Speaking UI cues.
       a.speakerIcon.visible = a.speaking;

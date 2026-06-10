@@ -2,10 +2,8 @@
 // A host opens a lobby; players join/ready; host starts. Each turn the next
 // queued player must spell a narrated word while everyone watches; a miss
 // eliminates them; last speller standing wins (solo = survival).
-import {
-  english10, english20, english35, english40, english50, english55, english60,
-  american10, american20, american35, american40, american50, american55, american60,
-} from "wordlist-js";
+import { english10, english20, american10, american20 } from "wordlist-js";
+import wotc from "./wotc.json" with { type: "json" };
 import { synth } from "./tts.js";
 
 const ROUND_MS = 22000;
@@ -58,28 +56,29 @@ const MISPRONOUNCED = new Set([
 ]);
 const EXCLUDE = new Set([...HOMOPHONES, ...SWEARS, ...MISPRONOUNCED]);
 
-function buildPool(lists, min = 4, max = 10) {
+// Difficulty grading comes from the official Scripps "Words of the Champions"
+// list (wotc.json, built from the edition the host provided). IMPORTANT: the
+// official levels ramp UP — One Bee is the EASIEST (grades 1-3: "water",
+// "apple"), Two Bee is genuinely hard, Three Bee champions is brutal — so the
+// game tiers map medium→One Bee, hard→Two Bee, veryhard→Three Bee study list,
+// impossible→Three Bee champions. Easy stays frequency-based (everyday words).
+function freqPool(lists, min, max) {
   const set = new Set();
-  for (const list of lists) {
+  for (const list of lists)
     for (const w of list)
       if (w.length >= min && w.length <= max && /^[a-z]+$/.test(w) && !EXCLUDE.has(w)) set.add(w);
-  }
   return [...set];
 }
+// A WOTC tier -> playable pool (single-token, length-sane, nothing excluded).
+const wotcPool = (arr) =>
+  arr.filter((w) => /^[a-z]+$/.test(w) && w.length >= 3 && w.length <= 20 && !EXCLUDE.has(w));
 
-// Difficulty ≈ SPELLING difficulty, approximated from corpus frequency + length.
-// wordlist-js bands are cumulative-rank deltas (10 = commonest ~4k words … 60 =
-// down to ~74k). Tiers ramp by rarity; the top two ALSO require length, so rarity
-// and length compound (long + uncommon = hardest). Tuned so obscure short words
-// (e.g. "wapiti", which sits in a mid-frequency band) read as HARD, not medium.
-const uncommon = [english35, english40, english50, english55, english60,
-                  american35, american40, american50, american55, american60];
 const POOLS = {
-  easy:       buildPool([english10, english20, american10, american20], 4, 8),   // commonest words
-  medium:     buildPool([english35, american35], 4, 9),                          // common-ish
-  hard:       buildPool([english40, english50, american40, american50], 5, 11),  // uncommon (e.g. wapiti)
-  veryhard:   buildPool(uncommon, 9, 12),                                        // long + uncommon
-  impossible: buildPool(uncommon, 13, 20),                                       // longest + uncommon
+  easy:       freqPool([english10, english20, american10, american20], 4, 8), // commonest everyday words
+  medium:     wotcPool(wotc.oneBee),        // Scripps One Bee (study + champions)
+  hard:       wotcPool(wotc.twoBee),        // Scripps Two Bee (study + champions)
+  veryhard:   wotcPool(wotc.threeBeeStudy), // Scripps Three Bee school study list
+  impossible: wotcPool(wotc.threeBee),      // Scripps Three Bee champions
 };
 
 // Difficulty ramps by ROUND (a lap = every alive player spelling once). Fixed
@@ -159,7 +158,7 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
 
   const bots = new Set(); // dev-only AI players
   const isBot = (id) => bots.has(id);
-  const BOT_NAMES = ["Ada", "Bo", "Cy", "Dot", "Eve", "Fox"];
+  const BOT_NAMES = ["Ada", "Bo", "Cy", "Dot", "Eve", "Fox", "Gus", "Ivy", "Jax", "Kit"];
 
   let order = []; // turn order = queue snapshot at start
   let mode = "basic"; // selected gamemode (only "basic" is implemented for now)
@@ -304,6 +303,23 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
     }
     sendLobby();
   };
+
+  // Bots idly glance around so their heads move like real players' (and so head
+  // tracking is testable solo). New gaze targets every few ticks; the client
+  // eases between them. The current speller's gaze is recentered instead.
+  setInterval(() => {
+    if (!bots.size || !getPlayerIds().length) return;
+    for (const b of bots) {
+      if (b === speller) {
+        broadcast({ type: "bee_look", id: b, yaw: 0, pitch: 0 });
+        continue;
+      }
+      if (Math.random() < 0.4) continue; // sometimes hold the current gaze
+      const yaw = (Math.random() * 2 - 1) * 0.9;
+      const pitch = (Math.random() * 2 - 1) * 0.25;
+      broadcast({ type: "bee_look", id: b, yaw, pitch });
+    }
+  }, 2200);
 
   const misspell = (w) => {
     if (w.length <= 3) return w + "x";
@@ -634,6 +650,14 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
             broadcast({ type: "bee_key", spellerId: speller, text: keyText, wpm: s.wpm, accuracy: s.accuracy });
           }
           break;
+        case "bee_look": {
+          // Gaze sync: relay where this player is looking so their avatar's head
+          // tracks it on other clients (client-throttled; clamped here).
+          const yaw = Math.max(-1.6, Math.min(1.6, Number(m.yaw) || 0));
+          const pitch = Math.max(-0.9, Math.min(0.9, Number(m.pitch) || 0));
+          broadcast({ type: "bee_look", id, yaw, pitch });
+          break;
+        }
         case "bee_answer":
           if (phase === "match" && id === speller && accepting && !answered) {
             answered = true;

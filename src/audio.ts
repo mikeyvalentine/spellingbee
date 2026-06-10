@@ -16,6 +16,7 @@ export interface AudioBus {
   resume(): void; // unlock the context after a user gesture
   playSfx(buf: AudioBuffer, rate?: number): AudioBufferSourceNode;
   startMusic(url: string): Promise<void>; // load once + loop forever with crossfade
+  setMusicEnabled(on: boolean): void; // gate music on/off (lobby-only) w/o touching the user's music volume
   volumes(): Volumes;
   setMaster(v: number): void;
   setMusic(v: number): void;
@@ -26,10 +27,13 @@ export function makeAudioBus(): AudioBus {
   const ctx = new AudioContext();
   const master = ctx.createGain();
   const music = ctx.createGain();
+  const musicEnable = ctx.createGain(); // lobby-only gate, independent of user music volume
   const sfx = ctx.createGain();
   master.connect(ctx.destination);
-  music.connect(master);
+  music.connect(musicEnable);
+  musicEnable.connect(master);
   sfx.connect(master);
+  musicEnable.gain.value = 1;
 
   const vols: Volumes = { master: 0.9, music: 0.4, sfx: 1 };
   try { Object.assign(vols, JSON.parse(localStorage.getItem(LS_KEY) || "{}")); } catch { /* ignore */ }
@@ -90,12 +94,23 @@ export function makeAudioBus(): AudioBus {
     }
   };
 
+  // Smoothly gate the music on/off (e.g. lobby-only). Ramps a dedicated gain so
+  // the user's chosen music volume is preserved when it comes back.
+  const setMusicEnabled = (on: boolean) => {
+    const t = ctx.currentTime;
+    const g = musicEnable.gain;
+    g.cancelScheduledValues(t);
+    g.setValueAtTime(Math.max(0.0001, g.value), t);
+    g.linearRampToValueAtTime(on ? 1 : 0.0001, t + 0.8);
+  };
+
   return {
     ctx,
     sfx,
     resume,
     playSfx,
     startMusic,
+    setMusicEnabled,
     volumes: () => ({ ...vols }),
     setMaster: (v) => { vols.master = v; master.gain.value = v; save(); },
     setMusic: (v) => { vols.music = v; music.gain.value = v; save(); },

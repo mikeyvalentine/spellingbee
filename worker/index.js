@@ -8,7 +8,7 @@
 // run_worker_first = true (wrangler.toml) means this Worker sees every request;
 // non-API paths fall through to env.ASSETS.fetch(), which serves dist/ and does
 // the SPA index.html fallback.
-import { configureTts, previewMp3, setVoice, getTtsChars } from "../server/tts.js";
+import { configureTts, previewAudio, setVoice, getTtsChars } from "../server/tts.js";
 
 export { BeeRoom } from "./room.js";
 export { Matchmaker } from "./matchmaker.js";
@@ -63,15 +63,30 @@ async function handleToken(request, env) {
 }
 
 async function handleVoicePreview(url, env) {
+  const provider = String(url.searchParams.get("provider") || "google");
   const voice = String(url.searchParams.get("voice") || "");
-  if (!voice) return new Response("missing voice", { status: 400 });
-  configureTts({ apiKey: env.GOOGLE_TTS_API_KEY, rate: env.GOOGLE_TTS_RATE });
+  const text = String(url.searchParams.get("text") || "");
+  configureTts({
+    apiKey: env.GOOGLE_TTS_API_KEY,
+    rate: env.GOOGLE_TTS_RATE,
+    falKey: env.FAL_KEY,
+    qwenVoice: env.QWEN_TTS_VOICE,
+    elevenKey: env.ELEVENLABS_API_KEY,
+    elevenVoiceId: env.ELEVENLABS_VOICE_ID,
+    elevenModel: env.ELEVENLABS_MODEL,
+    elevenSpeed: env.ELEVENLABS_SPEED,
+    elevenPronos: env.ELEVENLABS_PRONO_DICTS,
+  });
   try {
-    const b64 = await previewMp3("Your word is, lagoon.", voice);
+    // Google still needs an explicit voice; Qwen/ElevenLabs use configured defaults.
+    if (provider === "google" && !voice) return new Response("missing voice", { status: 400 });
+    const phrase = text || "Your word is, lagoon.";
+    const { b64, mime } = await previewAudio(phrase, { provider, voice });
     flushWorkerTts(env); // count preview chars toward usage
-    if (url.searchParams.get("set") === "1") setVoice(voice);
+    // ?set=1 also makes the picked Google voice the live game voice.
+    if (provider === "google" && url.searchParams.get("set") === "1") setVoice(voice);
     const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-    return new Response(bytes, { headers: { "Content-Type": "audio/mpeg" } });
+    return new Response(bytes, { headers: { "Content-Type": mime || "audio/mpeg" } });
   } catch (e) {
     return new Response(String(e.message || e), { status: 500 });
   }

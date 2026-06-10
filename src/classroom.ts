@@ -60,6 +60,8 @@ export interface Classroom {
   lobbyCam: CameraPose; // view while in the lobby
   matchCam: CameraPose; // fixed front view during a match
   seats: Seat[]; // per-player seating, indexed by join order
+  seatCams: CameraPose[]; // per-seat POV camera poses ('player', 'player.1' …), indexed like seats
+  hostSpot: Seat; // where the host stands in the lobby (the lobby-camera spot, facing the class)
   seatOffset: THREE.Vector3; // mutable offset applied to all seated avatars (debug)
   seatOffsets: THREE.Vector3[]; // per-seat fine-tune offset, indexed like seats (debug)
   spellerPos: THREE.Vector3; // where the active speller stands
@@ -123,6 +125,8 @@ export async function loadClassroom(scene: THREE.Scene): Promise<Classroom> {
     lobbyCam: layout.lobbyCam,
     matchCam: layout.matchCam,
     seats: layout.seats,
+    seatCams: layout.seatCams,
+    hostSpot: layout.hostSpot,
     seatOffsets: layout.seats.map((_, i) => new THREE.Vector3(...(SEAT_OFFSETS[i] ?? [0, 0, 0]))),
     seatOffset: new THREE.Vector3(0, 1, -0.3), // tuned via the debug panel
     spellerPos: layout.spellerPos,
@@ -172,6 +176,8 @@ interface ClassroomLayout {
   lobbyCam: CameraPose;
   matchCam: CameraPose;
   seats: Seat[];
+  seatCams: CameraPose[];
+  hostSpot: Seat;
   spellerPos: THREE.Vector3;
   lights: RoomLights;
 }
@@ -220,10 +226,32 @@ function buildFromGlb(root: THREE.Object3D, board: Chalkboard, stats: StatsBoard
     }
   });
 
-  // Hide marker meshes that shouldn't render in-game.
-  for (const key of ["currentturnplayerposition", "doorwindowarealight", "sphere"]) {
+  // Hide marker meshes that shouldn't render in-game. (The lamp's "sphere"
+  // marker stays visible — it doubles as the bulb, below.)
+  for (const key of ["currentturnplayerposition", "doorwindowarealight"]) {
     const o = objs.get(key);
     if (o) o.visible = false;
+  }
+
+  // The sphere inside the lamp head mimics the lightbulb: a warm emissive glow,
+  // kept moderate so the bloom pass reads it as a soft halo rather than a flare.
+  const bulb = objs.get("sphere");
+  if (bulb) {
+    bulb.visible = true;
+    const bulbMat = new THREE.MeshStandardMaterial({
+      color: 0xfff3d6,
+      emissive: 0xffc66e,
+      emissiveIntensity: 1.5,
+      roughness: 0.4,
+      metalness: 0,
+    });
+    bulb.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      m.material = bulbMat;
+      m.castShadow = false;
+      m.receiveShadow = false; // a light source shouldn't catch shadows
+    });
   }
 
   const poseOf = (cam?: THREE.PerspectiveCamera, fallback?: CameraPose): CameraPose => {
@@ -249,8 +277,26 @@ function buildFromGlb(root: THREE.Object3D, board: Chalkboard, stats: StatsBoard
   }
   const present = seatCams.filter(Boolean);
   const seats = present.map(seatOf);
+  const seatPoses = present.map((c) => poseOf(c)); // full per-seat POVs (lobby free-look)
   const matchCam = poseOf(present[0]);
   const lobbyCam = poseOf(cams.get("lobby"), matchCam);
+  lobbyCam.fov = matchCam.fov; // host POV uses the same FOV as the seat cameras
+  // The GLB's lobby cam aims a touch low — start the host view pitched up a bit.
+  lobbyCam.quat.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0.14, 0, 0)));
+  // Host position dialed in live via the debug panel (overrides the GLB cam spot).
+  lobbyCam.pos.set(0.27, 2.47, 6.65);
+  // The host stands at the lobby camera — the "teacher spot" — facing the class.
+  const lobbyCamObj = cams.get("lobby");
+  const hostSpot = lobbyCamObj
+    ? seatOf(lobbyCamObj)
+    : {
+        pos: new THREE.Vector3(lobbyCam.pos.x, 0, lobbyCam.pos.z),
+        yaw: (() => {
+          const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(lobbyCam.quat);
+          return Math.atan2(fwd.x, fwd.z);
+        })(),
+      };
+  hostSpot.pos.set(lobbyCam.pos.x, 0, lobbyCam.pos.z); // stand exactly under the dialed-in camera
 
   const spellerPos = SPELLER_POS.clone();
 
@@ -261,7 +307,7 @@ function buildFromGlb(root: THREE.Object3D, board: Chalkboard, stats: StatsBoard
   // Stats plane on the secondary (tall, narrow) board off to the side.
   mountStatsBoard(root, stats, mainCx);
 
-  return { root, lobbyCam, matchCam, seats, spellerPos, lights };
+  return { root, lobbyCam, matchCam, seats, seatCams: seatPoses, hostSpot, spellerPos, lights };
 }
 
 function buildLights(root: THREE.Object3D, objs: Map<string, THREE.Object3D>): RoomLights {
@@ -305,15 +351,12 @@ function buildLights(root: THREE.Object3D, objs: Map<string, THREE.Object3D>): R
   // originates from the desk lamp — the "sphere" placeholder mesh marks the bulb
   // — so the lamp reads as the source. Enabled on BOTH platforms (one light); its
   // shadow is desktop-only since mobile runs shadow-less. Falls back to overhead.
-  const spot = new THREE.SpotLight(0xffe1b0, 70, 26, Math.PI / 5, 0.5, 1.25);
-  const bulb = objs.get("sphere");
-  if (bulb) {
-    bulb.updateWorldMatrix(true, false);
-    bulb.getWorldPosition(spot.position);
-  } else {
-    spot.position.set(SPELLER_POS.x + 0.3, ceilY - 0.5, SPELLER_POS.z + 1.2);
-  }
-  spot.target.position.copy(SPELLER_POS); // still aimed at the player model
+  // Values dialed in live via the debug panel (intensity/distance/angle/penumbra/
+  // decay) and baked here. Position + aim were tuned at the lamp head; the target
+  // is the resolved point from the panel's yaw/pitch/reach.
+  const spot = new THREE.SpotLight(0xffe1b0, 40, 4.5, 0.78, 0.88, 2.9);
+  spot.position.set(4.22, 2.55, 4.94);
+  spot.target.position.set(4.287, 2.136, 6.276);
   spot.castShadow = !isMobile;
   if (!isMobile) {
     spot.shadow.mapSize.set(1024, 1024);
@@ -506,8 +549,13 @@ function buildProcedural(board: Chalkboard): ClassroomLayout {
     const z = i < 4 ? 0.5 : -1.2;
     seats.push({ pos: new THREE.Vector3(x, 0, z), yaw: 0 });
   }
+  // Eye-height POV at each seat, looking toward the board wall.
+  const seatCams = seats.map((s) =>
+    mk(new THREE.Vector3(s.pos.x, 1.55, s.pos.z), new THREE.Vector3(s.pos.x * 0.4, 1.8, 8))
+  );
+  const hostSpot: Seat = { pos: new THREE.Vector3(0, 0, 4), yaw: Math.PI };
 
-  return { root, lobbyCam, matchCam, seats, spellerPos: new THREE.Vector3(0, 0, 6), lights: { front: light } };
+  return { root, lobbyCam, matchCam, seats, seatCams, hostSpot, spellerPos: new THREE.Vector3(0, 0, 6), lights: { front: light } };
 }
 
 // ---------------------------------------------------------------------------
@@ -595,6 +643,21 @@ function drawSplatShape(c: CanvasRenderingContext2D, halfW: number, halfH: numbe
     c.beginPath(); c.ellipse(s.x * halfW, s.y * halfH, Math.max(2, s.r * halfW * 0.5), Math.max(3, s.r * halfH), 0.5, 0, Math.PI * 2); c.fill();
   }
 }
+// Bee icon — drawn in place of the 🐝 emoji wherever it appears in chalk text
+// (e.g. the "🐝 Spelling Bee" board header). Falls back to the emoji glyph
+// until the SVG finishes loading. Pre-rasterized once: canvas drawImage() of an
+// SVG re-rasterizes the vector on EVERY call, and the chalk surface redraws
+// every frame while the countdown bar animates.
+const BEE_ICON = new Image();
+let beeRaster: HTMLCanvasElement | null = null;
+BEE_ICON.onload = () => {
+  const c = document.createElement("canvas");
+  c.width = c.height = 128;
+  c.getContext("2d")?.drawImage(BEE_ICON, 0, 0, 128, 128);
+  beeRaster = c;
+};
+BEE_ICON.src = "/assets/bee.svg";
+
 interface Surface {
   tex: THREE.CanvasTexture;
   ctx: CanvasRenderingContext2D;
@@ -657,7 +720,14 @@ function makeSurface(w: number, h: number): Surface {
         const g = line.glyphs[i];
         ctx.font = g.font;
         ctx.fillStyle = g.color;
-        ctx.fillText(g.ch, g.x, g.y);
+        if (g.ch === "🐝" && beeRaster) {
+          // Swap the emoji for the (pre-rasterized) bee icon, sized to the glyph.
+          const m = /(\d+(?:\.\d+)?)px/.exec(g.font);
+          const fs = m ? parseFloat(m[1]) : 40;
+          ctx.drawImage(beeRaster, g.x, g.y - fs * 0.52, fs * 1.04, fs * 1.04);
+        } else {
+          ctx.fillText(g.ch, g.x, g.y);
+        }
       }
       if (line.underlineY != null && n > 0) {
         const first = line.glyphs[0];

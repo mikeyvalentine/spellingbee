@@ -28,10 +28,16 @@ export interface ClipboardView {
 const POSE = {
   // Negative rotX tilts the TOP away from the camera (leaning back). Focus faces
   // the camera flat (rotX 0) so the HTML paper lines up cleanly + larger.
-  peek: { pos: new THREE.Vector3(0, -1.62, -2.1), rotX: -0.32, scale: 1.0 },
-  hover: { pos: new THREE.Vector3(0, -1.42, -2.05), rotX: -0.26, scale: 1.02 },
+  peek: { pos: new THREE.Vector3(0, -2.02, -2.1), rotX: -0.32, scale: 1.0 },
+  hover: { pos: new THREE.Vector3(0, -1.82, -2.05), rotX: -0.26, scale: 1.02 },
   focus: { pos: new THREE.Vector3(0, -0.05, -1.28), rotX: 0.0, scale: 1.52 },
 };
+
+// The POSE offsets above were tuned against the original 84.5° lobby camera.
+// The per-seat POVs are much narrower (zoomier), which would blow the prop up on
+// screen — so update() scales the whole camera-space transform by the FOV tan
+// ratio, keeping the clipboard the same apparent size under any camera.
+const REF_TAN = Math.tan((84.47 * Math.PI) / 360);
 
 // Paper size relative to the board (used for the focused screen-rect projection).
 // A touch wider than before so the focused HTML controls have slack and headers
@@ -65,8 +71,14 @@ function buildPlaceholder(): { group: THREE.Group; paper: THREE.Mesh } {
   tab.position.set(0, 0.9, 0.07);
   group.add(tab);
 
-  group.renderOrder = 999; // draw on top of the room
-  group.traverse((o) => { (o as THREE.Mesh).renderOrder = 999; });
+  // View-model: draw on top of the room without depth-testing it — the per-seat
+  // POVs park the camera right behind a desk, which would otherwise occlude the
+  // peeking clipboard. With depth test off, explicit back-to-front renderOrder
+  // steps keep the board → paper → clip stacking correct.
+  [board, paper, bar, tab].forEach((o, i) => {
+    o.renderOrder = 999 + i;
+    (o.material as THREE.Material).depthTest = false;
+  });
   return { group, paper };
 }
 
@@ -118,8 +130,15 @@ export function makeClipboard(camera: THREE.PerspectiveCamera): ClipboardView {
     computePose();
 
     // World matrix = camera world * local offset (anchors it to the view).
+    // FOV compensation: angular size on screen ∝ size/distance ÷ tan(fov/2), so
+    // shrink the SIZE and the lateral x/y offsets by the tan ratio while keeping
+    // the camera distance (z) unchanged.
     camera.updateMatrixWorld();
-    local.compose(curPos, tmpQuat.setFromEuler(tmpEuler.set(curRotX, 0, 0)), tmpScale.set(curScale, curScale, curScale));
+    const fovScale = Math.tan((camera.fov * Math.PI) / 360) / REF_TAN;
+    const s = curScale * fovScale;
+    curPos.x *= fovScale;
+    curPos.y *= fovScale;
+    local.compose(curPos, tmpQuat.setFromEuler(tmpEuler.set(curRotX, 0, 0)), tmpScale.set(s, s, s));
     group.matrix.multiplyMatrices(camera.matrixWorld, local);
     group.matrixWorldNeedsUpdate = true;
   };

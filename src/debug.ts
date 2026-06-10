@@ -65,6 +65,24 @@ function rectLightGroup(title: string, l: THREE.RectAreaLight): Group {
 }
 
 function spotLightGroup(title: string, l: THREE.SpotLight): Group {
+  // Aim is expressed as yaw/pitch + reach around the light's position; we keep the
+  // beam length fixed and recompute the target whenever pos/aim sliders change.
+  const dir = l.target.position.clone().sub(l.position);
+  let reach = Math.max(0.5, dir.length());
+  dir.normalize();
+  let yaw = Math.atan2(dir.x, dir.z);
+  let pitch = Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1));
+  const applyAim = () => {
+    const cp = Math.cos(pitch);
+    l.target.position.set(
+      l.position.x + Math.sin(yaw) * cp * reach,
+      l.position.y + Math.sin(pitch) * reach,
+      l.position.z + Math.cos(yaw) * cp * reach,
+    );
+  };
+
+  const pos = v3("pos", l.position).map((s) => ({ ...s, set: (n: number) => { s.set(n); applyAim(); } }));
+
   return {
     title,
     sliders: [
@@ -73,7 +91,10 @@ function spotLightGroup(title: string, l: THREE.SpotLight): Group {
       { label: "angle", min: 0.05, max: 1.4, step: 0.01, get: () => l.angle, set: (n) => (l.angle = n) },
       { label: "penumbra", min: 0, max: 1, step: 0.02, get: () => l.penumbra, set: (n) => (l.penumbra = n) },
       { label: "decay", min: 0, max: 3, step: 0.05, get: () => l.decay, set: (n) => (l.decay = n) },
-      ...v3("pos", l.position),
+      ...pos,
+      { label: "yaw", min: -Math.PI, max: Math.PI, step: 0.01, get: () => yaw, set: (n) => { yaw = n; applyAim(); } },
+      { label: "pitch", min: -Math.PI / 2, max: Math.PI / 2, step: 0.01, get: () => pitch, set: (n) => { pitch = n; applyAim(); } },
+      { label: "reach", min: 0.5, max: 20, step: 0.1, get: () => reach, set: (n) => { reach = n; applyAim(); } },
     ],
     read: () => ({
       intensity: round(l.intensity),
@@ -82,6 +103,8 @@ function spotLightGroup(title: string, l: THREE.SpotLight): Group {
       penumbra: round(l.penumbra),
       decay: round(l.decay),
       pos: [round(l.position.x), round(l.position.y), round(l.position.z)],
+      target: [round(l.target.position.x), round(l.target.position.y), round(l.target.position.z)],
+      yaw: round(yaw), pitch: round(pitch), reach: round(reach),
     }),
   };
 }
@@ -125,6 +148,25 @@ export function setupDebug(classroom: Classroom, bloom?: BloomPass | null): void
       offset: [round(classroom.seatOffset.x), round(classroom.seatOffset.y), round(classroom.seatOffset.z)],
     }),
   });
+  // Lobby camera (the host POV). X/Z also drag the hostSpot along — the host's
+  // avatar stands at the camera — so the two never drift apart. Y is camera-only
+  // (the avatar stays on the floor). applyCamera copies the pose every frame and
+  // the debug loop re-places the host avatar, so changes are live.
+  groups.push({
+    title: "Lobby camera (host POV + avatar)",
+    sliders: [
+      { label: "pos x", min: -10, max: 10, step: 0.05, get: () => classroom.lobbyCam.pos.x,
+        set: (n) => { classroom.lobbyCam.pos.x = n; classroom.hostSpot.pos.x = n; } },
+      { label: "pos y", min: 0, max: 6, step: 0.05, get: () => classroom.lobbyCam.pos.y,
+        set: (n) => { classroom.lobbyCam.pos.y = n; } },
+      { label: "pos z", min: -12, max: 12, step: 0.05, get: () => classroom.lobbyCam.pos.z,
+        set: (n) => { classroom.lobbyCam.pos.z = n; classroom.hostSpot.pos.z = n; } },
+    ],
+    read: () => ({
+      pos: [round(classroom.lobbyCam.pos.x), round(classroom.lobbyCam.pos.y), round(classroom.lobbyCam.pos.z)],
+      hostSpot: [round(classroom.hostSpot.pos.x), round(classroom.hostSpot.pos.z)],
+    }),
+  });
   groups.push(pointLightGroup("Front point light", lights.front));
   if (lights.back) groups.push(pointLightGroup("Back point light", lights.back));
   if (lights.window instanceof THREE.RectAreaLight) groups.push(rectLightGroup("Window area light", lights.window));
@@ -143,7 +185,7 @@ export function setupDebug(classroom: Classroom, bloom?: BloomPass | null): void
     ["British · en-GB Neural2 A", "en-GB-Neural2-A"],
     ["Aussie · en-AU Neural2 A", "en-AU-Neural2-A"],
   ];
-  let lastVoice = "en-US-Neural2-F";
+  let lastVoice = "en-US-Neural2-J"; // matches the live game default
   const previewVoice = (name: string) => {
     lastVoice = name;
     const a = new Audio(`/api/voice-preview?set=1&voice=${encodeURIComponent(name)}`);
@@ -154,6 +196,37 @@ export function setupDebug(classroom: Classroom, bloom?: BloomPass | null): void
     sliders: [],
     buttons: VOICES.map(([label, name]) => ({ label, onClick: () => previewVoice(name) })),
     read: () => ({ voice: lastVoice }),
+  });
+
+  // A/B pronunciation test: the hardest words spoken Google (current voice) THEN
+  // Qwen3-TTS, back-to-back, so the rare-word pronunciation can be judged directly.
+  // Qwen runs via fal.ai — needs FAL_KEY set (.dev.vars locally / wrangler secret).
+  const HARD_WORDS = ["seraglio", "wapiti", "chamois", "quinoa", "colonel", "gnocchi", "onomatopoeia"];
+  type Provider = "google" | "qwen" | "elevenlabs";
+  const playOnce = (text: string, provider: Provider, voice?: string) =>
+    new Promise<void>((resolve) => {
+      const qs = new URLSearchParams({ provider, text });
+      if (voice) qs.set("voice", voice);
+      const a = new Audio(`/api/voice-preview?${qs.toString()}`);
+      a.onended = () => resolve();
+      a.onerror = () => resolve();
+      a.play().catch(() => resolve());
+    });
+  const playAB = async (word: string) => {
+    await playOnce(`${word}.`, "google", lastVoice); // A: Google (current voice)
+    await playOnce(`${word}.`, "elevenlabs"); // B: ElevenLabs (the new game voice)
+  };
+  groups.push({
+    title: "Voice A/B — Google → ElevenLabs (hard words)",
+    sliders: [],
+    buttons: [
+      ...HARD_WORDS.map((w) => ({ label: `🔊 ${w}`, onClick: () => void playAB(w) })),
+      { label: "— ElevenLabs only —", onClick: () => {} },
+      ...HARD_WORDS.map((w) => ({ label: `🎙 ${w} (11L)`, onClick: () => void playOnce(`${w}.`, "elevenlabs") })),
+      { label: "— Qwen only —", onClick: () => {} },
+      ...HARD_WORDS.map((w) => ({ label: `🅱 ${w} (Qwen)`, onClick: () => void playOnce(`${w}.`, "qwen") })),
+    ],
+    read: () => ({ hardWords: HARD_WORDS }),
   });
 
   // Right-side panel: per-chair (per-seat) position offsets in the lobby.
