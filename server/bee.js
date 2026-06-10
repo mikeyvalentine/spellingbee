@@ -2,10 +2,8 @@
 // A host opens a lobby; players join/ready; host starts. Each turn the next
 // queued player must spell a narrated word while everyone watches; a miss
 // eliminates them; last speller standing wins (solo = survival).
-import {
-  english10, english20, english35, english40, english50, english55, english60,
-  american10, american20, american35, american40, american50, american55, american60,
-} from "wordlist-js";
+import { english10, english20, english35, american10, american20, american35 } from "wordlist-js";
+import wotc from "./wotc.json" with { type: "json" };
 import { synth } from "./tts.js";
 
 const ROUND_MS = 22000;
@@ -58,49 +56,30 @@ const MISPRONOUNCED = new Set([
 ]);
 const EXCLUDE = new Set([...HOMOPHONES, ...SWEARS, ...MISPRONOUNCED]);
 
-// Difficulty ≈ SPELLING difficulty, approximated from corpus frequency + length.
-// wordlist-js bands are DISJOINT rank deltas (10 = commonest ~4k words … 60 = the
-// rarest ~74k tail), so each word sits in essentially one band. We rank a word by
-// its RAREST band (0 = common … 5 = rarest), then let LENGTH nudge it up or down.
-// Rarity drives the tier — length is only a modifier, NOT a gate — so an obscure
-// SHORT word (e.g. "seraglio", "wapiti", both in the rare english50 band) can
-// still grade very-hard / impossible instead of being capped at hard by length.
-const RARITY_BANDS = [
-  [english10, english20, american10, american20], // 0 — commonest
-  [english35, american35],                        // 1
-  [english40, american40],                        // 2
-  [english50, american50],                        // 3 — rare (wapiti, seraglio)
-  [english55, american55],                        // 4
-  [english60, american60],                        // 5 — rarest tail
-];
-
-// word -> rarest band rank it appears in.
-const rarestRank = new Map();
-RARITY_BANDS.forEach((lists, rank) => {
+// Difficulty grading. Corpus frequency + length is a poor proxy for SPELLING
+// difficulty (long regular compounds like "newspaperwomen" are trivial to spell;
+// short foreign words like "seraglio" are brutal). So the hard tiers come from the
+// Scripps "Words of the Champions" list — 4,000 words human-graded by the National
+// Spelling Bee into One/Two/Three Bee — bundled as wotc.json. The easy/medium
+// tiers stay frequency-based for a large pool of common words in the early rounds.
+function freqPool(lists, min, max) {
+  const set = new Set();
   for (const list of lists)
     for (const w of list)
-      if (w.length >= 4 && w.length <= 20 && /^[a-z]+$/.test(w) && !EXCLUDE.has(w))
-        rarestRank.set(w, Math.max(rarestRank.get(w) ?? rank, rank));
-});
-
-const clampTier = (n) => Math.max(0, Math.min(5, n));
-// Combine rarity (0–5) with length: long words are harder to spell, very short
-// ones easier. Result 0=easy … 4+=impossible.
-function tierFor(rank, len) {
-  let score = rank;
-  if (len >= 11) score += 2;
-  else if (len >= 8) score += 1;
-  else if (len <= 5) score -= 1;
-  score = clampTier(score);
-  return score <= 0 ? "easy"
-    : score === 1 ? "medium"
-    : score === 2 ? "hard"
-    : score === 3 ? "veryhard"
-    : "impossible";
+      if (w.length >= min && w.length <= max && /^[a-z]+$/.test(w) && !EXCLUDE.has(w)) set.add(w);
+  return [...set];
 }
+// A WOTC tier -> playable pool (single-token, length-sane, nothing excluded).
+const wotcPool = (arr) =>
+  arr.filter((w) => /^[a-z]+$/.test(w) && w.length >= 3 && w.length <= 20 && !EXCLUDE.has(w));
 
-const POOLS = { easy: [], medium: [], hard: [], veryhard: [], impossible: [] };
-for (const [w, rank] of rarestRank) POOLS[tierFor(rank, w.length)].push(w);
+const POOLS = {
+  easy:       freqPool([english10, english20, american10, american20], 4, 8), // commonest
+  medium:     freqPool([english35, american35], 4, 9),                        // common-ish
+  hard:       wotcPool(wotc.oneBee),   // Scripps WOTC · One Bee
+  veryhard:   wotcPool(wotc.twoBee),   // Scripps WOTC · Two Bee
+  impossible: wotcPool(wotc.threeBee), // Scripps WOTC · Three Bee
+};
 
 // Difficulty ramps by ROUND (a lap = every alive player spelling once). Fixed
 // schedule, identical for every lobby size:
