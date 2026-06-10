@@ -456,6 +456,13 @@ export function setupBee(opts: BeeOpts): BeeStage {
   // the first NON-host player takes the 'player' seat, the next 'player.1', etc.
   const lobbySeatIdx = (id: string) => seatOrder.filter((p) => p !== hostId).indexOf(id);
 
+  // True when this client's POV is the shared front 'player' camera during a
+  // match: the active speller (watching their own model on stage) and non-seated
+  // spectators (not in the match order) use it. Everyone else watches from the
+  // seat camera of their (shuffled) match-order desk.
+  const onMatchCam = () =>
+    phase === "match" && (localId === activeSpeller || !seatOrder.includes(localId));
+
   const seatPlayers = () => {
     avatars.setAllVisible(false);
     seatOrder.forEach((id, i) => {
@@ -482,8 +489,10 @@ export function setupBee(opts: BeeOpts): BeeStage {
       }
       if (phase === "match") {
         const seat = classroom.seats[i];
-        if (!seat || i === 0) {
-          av.visible = false; // no seat, or this is the match-camera seat
+        // Hide: no desk · my own seated body (my camera sits in its head) · the
+        // desk-0 occupant when MY view is the shared front cam (it sits there).
+        if (!seat || id === localId || (i === 0 && onMatchCam())) {
+          av.visible = false;
           return;
         }
         placeSeated(av, i);
@@ -883,11 +892,17 @@ export function setupBee(opts: BeeOpts): BeeStage {
     }
   };
 
-  // Per-player POV: the match keeps the shared front camera; in the lobby the
-  // host looks from the front (the lobby cam) and every other player looks out
-  // of their own seat camera ('player', 'player.1' … by non-host join order).
+  // Per-player POV. Lobby: the host looks from the front (lobby cam), everyone
+  // else from their own seat camera (by non-host join order). Match: the active
+  // speller + non-seated spectators use the shared front 'player' cam (the
+  // speller sees their own model on stage — unchanged); players waiting their
+  // turn watch from the seat camera of their shuffled match-order desk.
   const basePose = (): CameraPose => {
-    if (phase === "match") return classroom.matchCam;
+    if (phase === "match") {
+      if (onMatchCam()) return classroom.matchCam;
+      const i = seatOrder.indexOf(localId);
+      return (i >= 0 && classroom.seatCams[i]) || classroom.matchCam;
+    }
     if (localId === hostId) return classroom.lobbyCam;
     const i = lobbySeatIdx(localId);
     return (i >= 0 && classroom.seatCams[i]) || classroom.lobbyCam;
@@ -917,10 +932,11 @@ export function setupBee(opts: BeeOpts): BeeStage {
     targetMy = (e.clientY / window.innerHeight) * 2 - 1;
   });
   const applyCameraLife = (dt: number) => {
-    if (phase !== "match") {
-      // Lobby free-look. The clipboard is camera-anchored (clipboard.ts composes
-      // its matrix from the camera's each frame, AFTER this runs), so it stays
-      // glued to the same screen spot no matter where the player looks.
+    if (!onMatchCam()) {
+      // Free-look: the lobby, and seated players waiting their turn in a match.
+      // The clipboard is camera-anchored (clipboard.ts composes its matrix from
+      // the camera's each frame, AFTER this runs), so it stays glued to the same
+      // screen spot no matter where the player looks.
       if (!isTouch) { lookTX = targetMx; lookTY = targetMy; }
       lookGain += ((uiFocused() ? 0 : 1) - lookGain) * Math.min(1, dt * 4);
       lookX += (lookTX - lookX) * Math.min(1, dt * 5);
@@ -946,18 +962,20 @@ export function setupBee(opts: BeeOpts): BeeStage {
     camera.rotateX(-curMy * MAX_PITCH);
   };
 
-  // Touch: a one-finger drag on the 3D scene looks around (lobby only). The drag
-  // "grabs the world": dragging right swings the view left. DOM overlays (the
-  // clipboard tap-zone, panels, buttons) sit above the canvas and keep their taps.
+  // Touch: a one-finger drag on the 3D scene looks around (whenever free-look is
+  // active: the lobby + waiting players mid-match — never the speller, whose
+  // canvas taps belong to the golden chalk). The drag "grabs the world": dragging
+  // right swings the view left. DOM overlays (the clipboard tap-zone, panels,
+  // buttons) sit above the canvas and keep their taps.
   if (isTouch) {
     let dragId: number | null = null, dragLX = 0, dragLY = 0;
     const clampLook = (v: number) => Math.max(-1, Math.min(1, v));
     sceneCanvas.addEventListener("pointerdown", (e) => {
-      if (phase !== "lobby") return;
+      if (onMatchCam()) return;
       dragId = e.pointerId; dragLX = e.clientX; dragLY = e.clientY;
     });
     window.addEventListener("pointermove", (e) => {
-      if (dragId !== e.pointerId || phase !== "lobby") return;
+      if (dragId !== e.pointerId || onMatchCam()) return;
       lookTX = clampLook(lookTX - ((e.clientX - dragLX) * 2.4) / window.innerWidth);
       lookTY = clampLook(lookTY - ((e.clientY - dragLY) * 2.4) / window.innerHeight);
       dragLX = e.clientX; dragLY = e.clientY;
@@ -1006,9 +1024,9 @@ export function setupBee(opts: BeeOpts): BeeStage {
       // re-apply them every frame in mock/dev so the debug sliders stay live.
       if (debug) {
         seatOrder.forEach((id, i) => {
-          if (phase === "match" && (id === activeSpeller || i === 0)) return;
+          if (phase === "match" && id === activeSpeller) return;
           const av = avatars.get(id);
-          if (!av || !av.visible) return;
+          if (!av || !av.visible) return; // hidden = own body / desk-0 under the shared cam
           if (phase === "match") { placeSeated(av, i); return; }
           if (id === hostId) {
             av.position.copy(classroom.hostSpot.pos);
