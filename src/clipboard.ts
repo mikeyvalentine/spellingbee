@@ -33,6 +33,12 @@ const POSE = {
   focus: { pos: new THREE.Vector3(0, -0.05, -1.28), rotX: 0.0, scale: 1.52 },
 };
 
+// The POSE offsets above were tuned against the original 84.5° lobby camera.
+// The per-seat POVs are much narrower (zoomier), which would blow the prop up on
+// screen — so update() scales the whole camera-space transform by the FOV tan
+// ratio, keeping the clipboard the same apparent size under any camera.
+const REF_TAN = Math.tan((84.47 * Math.PI) / 360);
+
 // Paper size relative to the board (used for the focused screen-rect projection).
 // A touch wider than before so the focused HTML controls have slack and headers
 // don't briefly wrap as the panel finishes opening.
@@ -124,8 +130,12 @@ export function makeClipboard(camera: THREE.PerspectiveCamera): ClipboardView {
     computePose();
 
     // World matrix = camera world * local offset (anchors it to the view).
+    // Scaling pos + scale together about the camera origin preserves the exact
+    // screen projection at any FOV (only the irrelevant depth changes).
     camera.updateMatrixWorld();
-    local.compose(curPos, tmpQuat.setFromEuler(tmpEuler.set(curRotX, 0, 0)), tmpScale.set(curScale, curScale, curScale));
+    const fovScale = Math.tan((camera.fov * Math.PI) / 360) / REF_TAN;
+    const s = curScale * fovScale;
+    local.compose(curPos.multiplyScalar(fovScale), tmpQuat.setFromEuler(tmpEuler.set(curRotX, 0, 0)), tmpScale.set(s, s, s));
     group.matrix.multiplyMatrices(camera.matrixWorld, local);
     group.matrixWorldNeedsUpdate = true;
   };
