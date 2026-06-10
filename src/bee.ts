@@ -455,15 +455,22 @@ export function setupBee(opts: BeeOpts): BeeStage {
   // Lobby seating skips the host (they stand at the front, at the lobby camera):
   // the first NON-host player takes the 'player' seat, the next 'player.1', etc.
   const lobbySeatIdx = (id: string) => seatOrder.filter((p) => p !== hostId).indexOf(id);
+  // The local player's seat indices, cached by seatPlayers() — basePose() and
+  // onMatchCam() run every frame, so they must not rescan/allocate.
+  let myLobbySeat = -1; // index among non-hosts (lobby POV)
+  let myMatchSeat = -1; // index in the match order (match POV)
 
   // True when this client's POV is the shared front 'player' camera during a
   // match: the active speller (watching their own model on stage) and non-seated
   // spectators (not in the match order) use it. Everyone else watches from the
   // seat camera of their (shuffled) match-order desk.
   const onMatchCam = () =>
-    phase === "match" && (localId === activeSpeller || !seatOrder.includes(localId));
+    phase === "match" && (localId === activeSpeller || myMatchSeat < 0);
 
   const seatPlayers = () => {
+    const nonHosts = seatOrder.filter((p) => p !== hostId); // computed once, not per player
+    myLobbySeat = nonHosts.indexOf(localId);
+    myMatchSeat = seatOrder.indexOf(localId);
     avatars.setAllVisible(false);
     seatOrder.forEach((id, i) => {
       avatars.ensure(id, getName(id));
@@ -510,7 +517,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
         av.visible = true;
         return;
       }
-      const si = lobbySeatIdx(id);
+      const si = nonHosts.indexOf(id);
       const seat = classroom.seats[si];
       if (!seat) {
         av.visible = false; // more players than seat cameras
@@ -905,12 +912,10 @@ export function setupBee(opts: BeeOpts): BeeStage {
   const basePose = (): CameraPose => {
     if (phase === "match") {
       if (onMatchCam()) return classroom.matchCam;
-      const i = seatOrder.indexOf(localId);
-      return (i >= 0 && classroom.seatCams[i]) || classroom.matchCam;
+      return classroom.seatCams[myMatchSeat] || classroom.matchCam;
     }
     if (localId === hostId) return classroom.lobbyCam;
-    const i = lobbySeatIdx(localId);
-    return (i >= 0 && classroom.seatCams[i]) || classroom.lobbyCam;
+    return (myLobbySeat >= 0 && classroom.seatCams[myLobbySeat]) || classroom.lobbyCam;
   };
 
   // ---- camera life, applied on top of the base pose every frame ----

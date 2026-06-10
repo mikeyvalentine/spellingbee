@@ -645,8 +645,17 @@ function drawSplatShape(c: CanvasRenderingContext2D, halfW: number, halfH: numbe
 }
 // Bee icon — drawn in place of the 🐝 emoji wherever it appears in chalk text
 // (e.g. the "🐝 Spelling Bee" board header). Falls back to the emoji glyph
-// until the SVG finishes loading.
+// until the SVG finishes loading. Pre-rasterized once: canvas drawImage() of an
+// SVG re-rasterizes the vector on EVERY call, and the chalk surface redraws
+// every frame while the countdown bar animates.
 const BEE_ICON = new Image();
+let beeRaster: HTMLCanvasElement | null = null;
+BEE_ICON.onload = () => {
+  const c = document.createElement("canvas");
+  c.width = c.height = 128;
+  c.getContext("2d")?.drawImage(BEE_ICON, 0, 0, 128, 128);
+  beeRaster = c;
+};
 BEE_ICON.src = "/assets/bee.svg";
 
 interface Surface {
@@ -711,11 +720,11 @@ function makeSurface(w: number, h: number): Surface {
         const g = line.glyphs[i];
         ctx.font = g.font;
         ctx.fillStyle = g.color;
-        if (g.ch === "🐝" && BEE_ICON.complete && BEE_ICON.naturalWidth) {
-          // Swap the emoji for the bee SVG, sized to the glyph's font box.
+        if (g.ch === "🐝" && beeRaster) {
+          // Swap the emoji for the (pre-rasterized) bee icon, sized to the glyph.
           const m = /(\d+(?:\.\d+)?)px/.exec(g.font);
           const fs = m ? parseFloat(m[1]) : 40;
-          ctx.drawImage(BEE_ICON, g.x, g.y - fs * 0.52, fs * 1.04, fs * 1.04);
+          ctx.drawImage(beeRaster, g.x, g.y - fs * 0.52, fs * 1.04, fs * 1.04);
         } else {
           ctx.fillText(g.ch, g.x, g.y);
         }

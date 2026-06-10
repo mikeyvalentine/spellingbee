@@ -529,6 +529,13 @@ export class AvatarManager {
   private applyHeadLook(a: Avatar, dt: number): void {
     const hb = a.headBone;
     if (!hb) return;
+    // Most avatars most of the time have no gaze offset — skip all the work.
+    if (a.lookYaw === 0 && a.lookPitch === 0 &&
+        Math.abs(a.lookYawCur) < 0.001 && Math.abs(a.lookPitchCur) < 0.001) {
+      a.lookYawCur = 0;
+      a.lookPitchCur = 0;
+      return;
+    }
     const k = Math.min(1, dt * 10);
     a.lookYawCur += (a.lookYaw - a.lookYawCur) * k;
     a.lookPitchCur += (a.lookPitch - a.lookPitchCur) * k;
