@@ -21,13 +21,30 @@ let RATE = Number(ENV.GOOGLE_TTS_RATE || 0.9); // a touch slow for clarity
 let currentVoice = ENV.GOOGLE_TTS_VOICE || "en-US-Neural2-J";
 let apiKey = ENV.GOOGLE_TTS_API_KEY || "";
 
+// Qwen3-TTS (Apache-2.0) via fal.ai, used only for the debug A/B voice preview so
+// its rare-word pronunciation can be judged against Google before any real swap.
+let falKey = ENV.FAL_KEY || "";
+let qwenVoice = ENV.QWEN_TTS_VOICE || "Ryan"; // an American-English male voice
+const QWEN_MODEL = ENV.QWEN_TTS_MODEL || "fal-ai/qwen-3-tts/text-to-speech/1.7b";
+
 // Set credentials/voice/rate at runtime (used by the Cloudflare Worker, which
 // passes its env bindings). Safe to call multiple times.
-export const configureTts = ({ apiKey: k, voice, rate } = {}) => {
+export const configureTts = ({ apiKey: k, voice, rate, falKey: fk, qwenVoice: qv } = {}) => {
   if (k) apiKey = k;
   if (voice) currentVoice = voice;
   if (rate != null && rate !== "") RATE = Number(rate);
+  if (fk) falKey = fk;
+  if (qv) qwenVoice = qv;
 };
+
+// base64 of an ArrayBuffer, working in both Node (Buffer) and the Worker (btoa).
+function toB64(buf) {
+  const bytes = new Uint8Array(buf);
+  if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("base64");
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
 
 export const getVoice = () => currentVoice;
 // Switch the active voice at runtime (used by the debug voice picker). Clears the
@@ -84,5 +101,30 @@ export async function synth(word) {
   }
 }
 
-// Base64 MP3 of a sample phrase in a specific voice (for the debug preview).
+// Qwen3-TTS via fal.ai's synchronous endpoint. Returns base64 of the (MP3) audio.
+// fal returns a JSON pointer to the rendered file, which we fetch + inline so the
+// caller gets the same base64 shape as gtts().
+async function qtts(text, voice = qwenVoice) {
+  if (!falKey) throw new Error("FAL_KEY is not set");
+  const res = await fetch(`https://fal.run/${QWEN_MODEL}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Key ${falKey}` },
+    body: JSON.stringify({ text, voice, language: "English" }),
+  });
+  if (!res.ok) throw new Error(`Qwen TTS ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const data = await res.json();
+  const audioUrl = data?.audio?.url;
+  if (!audioUrl) throw new Error("Qwen TTS: no audio url in response");
+  const a = await fetch(audioUrl);
+  if (!a.ok) throw new Error(`Qwen audio fetch ${a.status}`);
+  return { b64: toB64(await a.arrayBuffer()), mime: data.audio.content_type || "audio/mpeg" };
+}
+
+// Debug A/B preview: synthesize `text` with either provider. Returns { b64, mime }.
+export async function previewAudio(text, { provider = "google", voice } = {}) {
+  if (provider === "qwen") return qtts(text, voice);
+  return { b64: await gtts(text, voice || currentVoice), mime: "audio/mpeg" };
+}
+
+// Base64 MP3 of a sample phrase in a specific (Google) voice — back-compat helper.
 export const previewMp3 = (text, voice) => gtts(text, voice);

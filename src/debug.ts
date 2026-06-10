@@ -64,10 +64,7 @@ function rectLightGroup(title: string, l: THREE.RectAreaLight): Group {
   };
 }
 
-function spotLightGroup(title: string, l: THREE.SpotLight, marker?: THREE.Mesh): Group {
-  // Show the marker sphere so the spotlight origin can be dialed in visually.
-  if (marker) marker.visible = true;
-
+function spotLightGroup(title: string, l: THREE.SpotLight): Group {
   // Aim is expressed as yaw/pitch + reach around the light's position; we keep the
   // beam length fixed and recompute the target whenever pos/aim sliders change.
   const dir = l.target.position.clone().sub(l.position);
@@ -82,7 +79,6 @@ function spotLightGroup(title: string, l: THREE.SpotLight, marker?: THREE.Mesh):
       l.position.y + Math.sin(pitch) * reach,
       l.position.z + Math.cos(yaw) * cp * reach,
     );
-    if (marker) marker.position.copy(l.position);
   };
 
   const pos = v3("pos", l.position).map((s) => ({ ...s, set: (n: number) => { s.set(n); applyAim(); } }));
@@ -155,7 +151,7 @@ export function setupDebug(classroom: Classroom, bloom?: BloomPass | null): void
   groups.push(pointLightGroup("Front point light", lights.front));
   if (lights.back) groups.push(pointLightGroup("Back point light", lights.back));
   if (lights.window instanceof THREE.RectAreaLight) groups.push(rectLightGroup("Window area light", lights.window));
-  if (lights.spot) groups.push(spotLightGroup("Lamp spotlight", lights.spot, lights.spotMarker));
+  if (lights.spot) groups.push(spotLightGroup("Lamp spotlight", lights.spot));
 
   // Google TTS voice picker — click to preview (plays a sample) AND make it the
   // active game voice. Set GOOGLE_TTS_VOICE in .env to bake in your favorite.
@@ -170,7 +166,7 @@ export function setupDebug(classroom: Classroom, bloom?: BloomPass | null): void
     ["British · en-GB Neural2 A", "en-GB-Neural2-A"],
     ["Aussie · en-AU Neural2 A", "en-AU-Neural2-A"],
   ];
-  let lastVoice = "en-US-Neural2-F";
+  let lastVoice = "en-US-Neural2-J"; // matches the live game default
   const previewVoice = (name: string) => {
     lastVoice = name;
     const a = new Audio(`/api/voice-preview?set=1&voice=${encodeURIComponent(name)}`);
@@ -181,6 +177,34 @@ export function setupDebug(classroom: Classroom, bloom?: BloomPass | null): void
     sliders: [],
     buttons: VOICES.map(([label, name]) => ({ label, onClick: () => previewVoice(name) })),
     read: () => ({ voice: lastVoice }),
+  });
+
+  // A/B pronunciation test: the hardest words spoken Google (current voice) THEN
+  // Qwen3-TTS, back-to-back, so the rare-word pronunciation can be judged directly.
+  // Qwen runs via fal.ai — needs FAL_KEY set (.dev.vars locally / wrangler secret).
+  const HARD_WORDS = ["seraglio", "wapiti", "chamois", "quinoa", "colonel", "gnocchi", "onomatopoeia"];
+  const playOnce = (text: string, provider: "google" | "qwen", voice?: string) =>
+    new Promise<void>((resolve) => {
+      const qs = new URLSearchParams({ provider, text });
+      if (voice) qs.set("voice", voice);
+      const a = new Audio(`/api/voice-preview?${qs.toString()}`);
+      a.onended = () => resolve();
+      a.onerror = () => resolve();
+      a.play().catch(() => resolve());
+    });
+  const playAB = async (word: string) => {
+    await playOnce(`${word}.`, "google", lastVoice); // A: Google (current voice)
+    await playOnce(`${word}.`, "qwen"); // B: Qwen3-TTS
+  };
+  groups.push({
+    title: "Voice A/B — Google → Qwen (hard words)",
+    sliders: [],
+    buttons: [
+      ...HARD_WORDS.map((w) => ({ label: `🔊 ${w}`, onClick: () => void playAB(w) })),
+      { label: "— Qwen only —", onClick: () => {} },
+      ...HARD_WORDS.map((w) => ({ label: `🅱 ${w} (Qwen)`, onClick: () => void playOnce(`${w}.`, "qwen") })),
+    ],
+    read: () => ({ hardWords: HARD_WORDS }),
   });
 
   // Right-side panel: per-chair (per-seat) position offsets in the lobby.
