@@ -305,7 +305,7 @@ function buildLights(root: THREE.Object3D, objs: Map<string, THREE.Object3D>): R
   // originates from the desk lamp — the "sphere" placeholder mesh marks the bulb
   // — so the lamp reads as the source. Enabled on BOTH platforms (one light); its
   // shadow is desktop-only since mobile runs shadow-less. Falls back to overhead.
-  const spot = new THREE.SpotLight(0xffe1b0, 130, 26, Math.PI / 5, 0.5, 1.25);
+  const spot = new THREE.SpotLight(0xffe1b0, 70, 26, Math.PI / 5, 0.5, 1.25);
   const bulb = objs.get("sphere");
   if (bulb) {
     bulb.updateWorldMatrix(true, false);

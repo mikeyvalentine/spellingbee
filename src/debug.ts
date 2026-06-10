@@ -64,6 +64,28 @@ function rectLightGroup(title: string, l: THREE.RectAreaLight): Group {
   };
 }
 
+function spotLightGroup(title: string, l: THREE.SpotLight): Group {
+  return {
+    title,
+    sliders: [
+      { label: "intensity", min: 0, max: 300, step: 1, get: () => l.intensity, set: (n) => (l.intensity = n) },
+      { label: "distance", min: 0, max: 60, step: 0.5, get: () => l.distance, set: (n) => (l.distance = n) },
+      { label: "angle", min: 0.05, max: 1.4, step: 0.01, get: () => l.angle, set: (n) => (l.angle = n) },
+      { label: "penumbra", min: 0, max: 1, step: 0.02, get: () => l.penumbra, set: (n) => (l.penumbra = n) },
+      { label: "decay", min: 0, max: 3, step: 0.05, get: () => l.decay, set: (n) => (l.decay = n) },
+      ...v3("pos", l.position),
+    ],
+    read: () => ({
+      intensity: round(l.intensity),
+      distance: round(l.distance),
+      angle: round(l.angle),
+      penumbra: round(l.penumbra),
+      decay: round(l.decay),
+      pos: [round(l.position.x), round(l.position.y), round(l.position.z)],
+    }),
+  };
+}
+
 // Structural type for the bloom pass (avoids importing the postprocessing module
 // just for a type) — UnrealBloomPass exposes these mutable props.
 interface BloomPass { strength: number; radius: number; threshold: number; }
@@ -106,6 +128,7 @@ export function setupDebug(classroom: Classroom, bloom?: BloomPass | null): void
   groups.push(pointLightGroup("Front point light", lights.front));
   if (lights.back) groups.push(pointLightGroup("Back point light", lights.back));
   if (lights.window instanceof THREE.RectAreaLight) groups.push(rectLightGroup("Window area light", lights.window));
+  if (lights.spot) groups.push(spotLightGroup("Lamp spotlight", lights.spot));
 
   // Google TTS voice picker — click to preview (plays a sample) AND make it the
   // active game voice. Set GOOGLE_TTS_VOICE in .env to bake in your favorite.
