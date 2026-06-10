@@ -58,29 +58,49 @@ const MISPRONOUNCED = new Set([
 ]);
 const EXCLUDE = new Set([...HOMOPHONES, ...SWEARS, ...MISPRONOUNCED]);
 
-function buildPool(lists, min = 4, max = 10) {
-  const set = new Set();
-  for (const list of lists) {
+// Difficulty ≈ SPELLING difficulty, approximated from corpus frequency + length.
+// wordlist-js bands are DISJOINT rank deltas (10 = commonest ~4k words … 60 = the
+// rarest ~74k tail), so each word sits in essentially one band. We rank a word by
+// its RAREST band (0 = common … 5 = rarest), then let LENGTH nudge it up or down.
+// Rarity drives the tier — length is only a modifier, NOT a gate — so an obscure
+// SHORT word (e.g. "seraglio", "wapiti", both in the rare english50 band) can
+// still grade very-hard / impossible instead of being capped at hard by length.
+const RARITY_BANDS = [
+  [english10, english20, american10, american20], // 0 — commonest
+  [english35, american35],                        // 1
+  [english40, american40],                        // 2
+  [english50, american50],                        // 3 — rare (wapiti, seraglio)
+  [english55, american55],                        // 4
+  [english60, american60],                        // 5 — rarest tail
+];
+
+// word -> rarest band rank it appears in.
+const rarestRank = new Map();
+RARITY_BANDS.forEach((lists, rank) => {
+  for (const list of lists)
     for (const w of list)
-      if (w.length >= min && w.length <= max && /^[a-z]+$/.test(w) && !EXCLUDE.has(w)) set.add(w);
-  }
-  return [...set];
+      if (w.length >= 4 && w.length <= 20 && /^[a-z]+$/.test(w) && !EXCLUDE.has(w))
+        rarestRank.set(w, Math.max(rarestRank.get(w) ?? rank, rank));
+});
+
+const clampTier = (n) => Math.max(0, Math.min(5, n));
+// Combine rarity (0–5) with length: long words are harder to spell, very short
+// ones easier. Result 0=easy … 4+=impossible.
+function tierFor(rank, len) {
+  let score = rank;
+  if (len >= 11) score += 2;
+  else if (len >= 8) score += 1;
+  else if (len <= 5) score -= 1;
+  score = clampTier(score);
+  return score <= 0 ? "easy"
+    : score === 1 ? "medium"
+    : score === 2 ? "hard"
+    : score === 3 ? "veryhard"
+    : "impossible";
 }
 
-// Difficulty ≈ SPELLING difficulty, approximated from corpus frequency + length.
-// wordlist-js bands are cumulative-rank deltas (10 = commonest ~4k words … 60 =
-// down to ~74k). Tiers ramp by rarity; the top two ALSO require length, so rarity
-// and length compound (long + uncommon = hardest). Tuned so obscure short words
-// (e.g. "wapiti", which sits in a mid-frequency band) read as HARD, not medium.
-const uncommon = [english35, english40, english50, english55, english60,
-                  american35, american40, american50, american55, american60];
-const POOLS = {
-  easy:       buildPool([english10, english20, american10, american20], 4, 8),   // commonest words
-  medium:     buildPool([english35, american35], 4, 9),                          // common-ish
-  hard:       buildPool([english40, english50, american40, american50], 5, 11),  // uncommon (e.g. wapiti)
-  veryhard:   buildPool(uncommon, 9, 12),                                        // long + uncommon
-  impossible: buildPool(uncommon, 13, 20),                                       // longest + uncommon
-};
+const POOLS = { easy: [], medium: [], hard: [], veryhard: [], impossible: [] };
+for (const [w, rank] of rarestRank) POOLS[tierFor(rank, w.length)].push(w);
 
 // Difficulty ramps by ROUND (a lap = every alive player spelling once). Fixed
 // schedule, identical for every lobby size:

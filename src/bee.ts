@@ -487,6 +487,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
   const enterLobby = (queue: string[]) => {
     phase = "lobby";
     matchOver = false;
+    audio.setMusicEnabled(true); // background song plays in the lobby only
     cancelAnimationFrame(timerRaf);
     activeSpeller = null;
     amSpectator = false;
@@ -507,6 +508,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
   const enterMatch = (order: string[]) => {
     phase = "match";
     matchOver = false;
+    audio.setMusicEnabled(false); // silence the lobby song during the match
     seatOrder = order.length ? order : seatOrder;
     amSpectator = order.length > 0 && !order.includes(localId);
     setSpec(amSpectator);
@@ -824,6 +826,12 @@ export function setupBee(opts: BeeOpts): BeeStage {
         classroom.clearStats();
         answered = true;
         aliveIds = [];
+        // Showcase the winner: pull THEM to the front-stage spot (under the lamp
+        // spotlight, replacing whoever was last up) and loop a celebratory wave.
+        // seatPlayers() returns everyone else to their chairs.
+        activeSpeller = w; // null clears the stage spot
+        seatPlayers();
+        if (w && !avatars.celebrate(w)) avatars.playEmote(w, "wave", false, 1);
         classroom.clearSplat();
         updateMatchHud();
         updateTomatoBtn();

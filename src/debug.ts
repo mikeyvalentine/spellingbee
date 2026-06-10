@@ -64,7 +64,29 @@ function rectLightGroup(title: string, l: THREE.RectAreaLight): Group {
   };
 }
 
-function spotLightGroup(title: string, l: THREE.SpotLight): Group {
+function spotLightGroup(title: string, l: THREE.SpotLight, marker?: THREE.Mesh): Group {
+  // Show the marker sphere so the spotlight origin can be dialed in visually.
+  if (marker) marker.visible = true;
+
+  // Aim is expressed as yaw/pitch + reach around the light's position; we keep the
+  // beam length fixed and recompute the target whenever pos/aim sliders change.
+  const dir = l.target.position.clone().sub(l.position);
+  let reach = Math.max(0.5, dir.length());
+  dir.normalize();
+  let yaw = Math.atan2(dir.x, dir.z);
+  let pitch = Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1));
+  const applyAim = () => {
+    const cp = Math.cos(pitch);
+    l.target.position.set(
+      l.position.x + Math.sin(yaw) * cp * reach,
+      l.position.y + Math.sin(pitch) * reach,
+      l.position.z + Math.cos(yaw) * cp * reach,
+    );
+    if (marker) marker.position.copy(l.position);
+  };
+
+  const pos = v3("pos", l.position).map((s) => ({ ...s, set: (n: number) => { s.set(n); applyAim(); } }));
+
   return {
     title,
     sliders: [
@@ -73,7 +95,10 @@ function spotLightGroup(title: string, l: THREE.SpotLight): Group {
       { label: "angle", min: 0.05, max: 1.4, step: 0.01, get: () => l.angle, set: (n) => (l.angle = n) },
       { label: "penumbra", min: 0, max: 1, step: 0.02, get: () => l.penumbra, set: (n) => (l.penumbra = n) },
       { label: "decay", min: 0, max: 3, step: 0.05, get: () => l.decay, set: (n) => (l.decay = n) },
-      ...v3("pos", l.position),
+      ...pos,
+      { label: "yaw", min: -Math.PI, max: Math.PI, step: 0.01, get: () => yaw, set: (n) => { yaw = n; applyAim(); } },
+      { label: "pitch", min: -Math.PI / 2, max: Math.PI / 2, step: 0.01, get: () => pitch, set: (n) => { pitch = n; applyAim(); } },
+      { label: "reach", min: 0.5, max: 20, step: 0.1, get: () => reach, set: (n) => { reach = n; applyAim(); } },
     ],
     read: () => ({
       intensity: round(l.intensity),
@@ -82,6 +107,8 @@ function spotLightGroup(title: string, l: THREE.SpotLight): Group {
       penumbra: round(l.penumbra),
       decay: round(l.decay),
       pos: [round(l.position.x), round(l.position.y), round(l.position.z)],
+      target: [round(l.target.position.x), round(l.target.position.y), round(l.target.position.z)],
+      yaw: round(yaw), pitch: round(pitch), reach: round(reach),
     }),
   };
 }
@@ -128,7 +155,7 @@ export function setupDebug(classroom: Classroom, bloom?: BloomPass | null): void
   groups.push(pointLightGroup("Front point light", lights.front));
   if (lights.back) groups.push(pointLightGroup("Back point light", lights.back));
   if (lights.window instanceof THREE.RectAreaLight) groups.push(rectLightGroup("Window area light", lights.window));
-  if (lights.spot) groups.push(spotLightGroup("Lamp spotlight", lights.spot));
+  if (lights.spot) groups.push(spotLightGroup("Lamp spotlight", lights.spot, lights.spotMarker));
 
   // Google TTS voice picker — click to preview (plays a sample) AND make it the
   // active game voice. Set GOOGLE_TTS_VOICE in .env to bake in your favorite.

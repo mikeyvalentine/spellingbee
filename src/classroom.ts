@@ -52,6 +52,7 @@ export interface RoomLights {
   back?: THREE.PointLight;
   window?: THREE.RectAreaLight | THREE.PointLight; // PointLight on mobile (cheap)
   spot?: THREE.SpotLight; // warm stage spotlight on the active speller (vibe pass)
+  spotMarker?: THREE.Mesh; // dev-only visible marker at the spotlight's position
   accents?: THREE.Light[]; // extra colored/fill accent lights (vibe pass)
 }
 
@@ -322,6 +323,17 @@ function buildLights(root: THREE.Object3D, objs: Map<string, THREE.Object3D>): R
   root.add(spot);
   root.add(spot.target);
 
+  // Dev-only visible marker sphere at the spotlight position, for dialing in the
+  // bulb placement live via the debug panel. Hidden by default (debug.ts unhides).
+  const spotMarker = new THREE.Mesh(
+    new THREE.SphereGeometry(0.12, 16, 16),
+    new THREE.MeshBasicMaterial({ color: 0xffe1b0 }),
+  );
+  spotMarker.position.copy(spot.position);
+  spotMarker.visible = false;
+  spotMarker.renderOrder = 999;
+  root.add(spotMarker);
+
   // The remaining accent lights are extra forward lights; keep them desktop-only
   // (mobile already runs a lean lighting profile). The warm color re-skin still
   // applies on mobile. All tunable; intensities assume ACES + ~0.95 exposure.
@@ -353,7 +365,7 @@ function buildLights(root: THREE.Object3D, objs: Map<string, THREE.Object3D>): R
     accents.push(teal);
   }
 
-  return { front, back, window: win, spot, accents };
+  return { front, back, window: win, spot, spotMarker, accents };
 }
 
 function buildWindowLight(plane: THREE.Object3D | undefined, isMobile: boolean): THREE.RectAreaLight | THREE.PointLight {

@@ -427,6 +427,26 @@ export class AvatarManager {
     return true;
   }
 
+  /** Loops the Wave clip indefinitely — the winner's celebration on the game-over
+   *  screen. Held until clearEmote()/seatPlayers() resets it. Returns false if the
+   *  model has no Wave clip so the caller can decide what to do. */
+  celebrate(id: string): boolean {
+    const a = this.avatars.get(id);
+    if (!a) return false;
+    const action = a.actions.wave;
+    if (!action) return false;
+    if (a.emote && a.emote !== "wave") a.actions[a.emote]?.stop();
+    if (a.state === "wave") a.state = "idle"; // force transitionTo to restart the clip
+    action.reset();
+    action.setEffectiveTimeScale(1);
+    action.setLoop(THREE.LoopRepeat, Infinity); // loop the wave for the whole end screen
+    a.emote = "wave";
+    a.emoteHold = false;
+    a.emoteHoldTime = Infinity;
+    a.emoteUntil = Infinity; // never auto-expire — runs until cleared
+    return true;
+  }
+
   /** Show/hide an avatar's floating nametag (the speller's is hidden mid-match). */
   setLabelVisible(id: string, visible: boolean): void {
     const a = this.avatars.get(id);
