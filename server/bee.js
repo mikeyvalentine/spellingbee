@@ -67,16 +67,19 @@ function buildPool(lists, min = 4, max = 10) {
   return [...set];
 }
 
-// wordlist-js sizes are frequency BANDS (deltas). Rarer band = harder; and since
-// nothing rarer than band 60 ships, very-hard/impossible escalate by LENGTH too
-// (long uncommon words are the toughest to spell).
-const hardBands = [english50, english55, english60, american50, american55, american60];
+// Difficulty ≈ SPELLING difficulty, approximated from corpus frequency + length.
+// wordlist-js bands are cumulative-rank deltas (10 = commonest ~4k words … 60 =
+// down to ~74k). Tiers ramp by rarity; the top two ALSO require length, so rarity
+// and length compound (long + uncommon = hardest). Tuned so obscure short words
+// (e.g. "wapiti", which sits in a mid-frequency band) read as HARD, not medium.
+const uncommon = [english35, english40, english50, english55, english60,
+                  american35, american40, american50, american55, american60];
 const POOLS = {
-  easy: buildPool([english10, english20, english35, american10, american20, american35], 4, 8),
-  medium: buildPool([english40, english50, american40, american50], 4, 9),
-  hard: buildPool([english55, english60, american55, american60], 5, 11),
-  veryhard: buildPool(hardBands, 9, 12),
-  impossible: buildPool(hardBands, 12, 20),
+  easy:       buildPool([english10, english20, american10, american20], 4, 8),   // commonest words
+  medium:     buildPool([english35, american35], 4, 9),                          // common-ish
+  hard:       buildPool([english40, english50, american40, american50], 5, 11),  // uncommon (e.g. wapiti)
+  veryhard:   buildPool(uncommon, 9, 12),                                        // long + uncommon
+  impossible: buildPool(uncommon, 13, 20),                                       // longest + uncommon
 };
 
 // Difficulty ramps by ROUND (a lap = every alive player spelling once). Fixed
