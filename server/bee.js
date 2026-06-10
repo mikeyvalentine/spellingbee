@@ -158,7 +158,7 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
 
   const bots = new Set(); // dev-only AI players
   const isBot = (id) => bots.has(id);
-  const BOT_NAMES = ["Ada", "Bo", "Cy", "Dot", "Eve", "Fox"];
+  const BOT_NAMES = ["Ada", "Bo", "Cy", "Dot", "Eve", "Fox", "Gus", "Ivy", "Jax", "Kit"];
 
   let order = []; // turn order = queue snapshot at start
   let mode = "basic"; // selected gamemode (only "basic" is implemented for now)
