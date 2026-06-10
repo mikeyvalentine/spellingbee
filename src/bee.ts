@@ -927,8 +927,8 @@ export function setupBee(opts: BeeOpts): BeeStage {
   // Free-look range: cursor at the screen edge (or a full-width drag) = full
   // sweep. Wide enough to glance "over your shoulder" without spinning the room.
   // Down gets a bit more travel than up.
-  const LOOK_YAW = 1.2; // radians (~69°) each way
-  const LOOK_PITCH_UP = 0.22, LOOK_PITCH_DOWN = 0.3;
+  const LOOK_YAW = 0.84; // radians (~48°) each way
+  const LOOK_PITCH_UP = 0.15, LOOK_PITCH_DOWN = 0.21;
   let lookTX = 0, lookTY = 0; // free-look target, -1..1 (touch drags write here)
   let lookX = 0, lookY = 0; // eased
   let lookGain = 1; // eases to 0 while the clipboard is up, so it reads calmly
@@ -995,8 +995,8 @@ export function setupBee(opts: BeeOpts): BeeStage {
     });
     window.addEventListener("pointermove", (e) => {
       if (dragId !== e.pointerId || onMatchCam()) return;
-      lookTX = clampLook(lookTX - ((e.clientX - dragLX) * 2.4) / window.innerWidth);
-      lookTY = clampLook(lookTY - ((e.clientY - dragLY) * 2.4) / window.innerHeight);
+      lookTX = clampLook(lookTX - ((e.clientX - dragLX) * 1.7) / window.innerWidth);
+      lookTY = clampLook(lookTY - ((e.clientY - dragLY) * 1.7) / window.innerHeight);
       dragLX = e.clientX; dragLY = e.clientY;
     });
     const endDrag = (e: PointerEvent) => { if (dragId === e.pointerId) dragId = null; };
