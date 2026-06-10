@@ -304,6 +304,23 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
     sendLobby();
   };
 
+  // Bots idly glance around so their heads move like real players' (and so head
+  // tracking is testable solo). New gaze targets every few ticks; the client
+  // eases between them. The current speller's gaze is recentered instead.
+  setInterval(() => {
+    if (!bots.size || !getPlayerIds().length) return;
+    for (const b of bots) {
+      if (b === speller) {
+        broadcast({ type: "bee_look", id: b, yaw: 0, pitch: 0 });
+        continue;
+      }
+      if (Math.random() < 0.4) continue; // sometimes hold the current gaze
+      const yaw = (Math.random() * 2 - 1) * 0.9;
+      const pitch = (Math.random() * 2 - 1) * 0.25;
+      broadcast({ type: "bee_look", id: b, yaw, pitch });
+    }
+  }, 2200);
+
   const misspell = (w) => {
     if (w.length <= 3) return w + "x";
     const i = 1 + Math.floor(Math.random() * (w.length - 2));
