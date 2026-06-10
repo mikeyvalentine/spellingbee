@@ -226,10 +226,32 @@ function buildFromGlb(root: THREE.Object3D, board: Chalkboard, stats: StatsBoard
     }
   });
 
-  // Hide marker meshes that shouldn't render in-game.
-  for (const key of ["currentturnplayerposition", "doorwindowarealight", "sphere"]) {
+  // Hide marker meshes that shouldn't render in-game. (The lamp's "sphere"
+  // marker stays visible — it doubles as the bulb, below.)
+  for (const key of ["currentturnplayerposition", "doorwindowarealight"]) {
     const o = objs.get(key);
     if (o) o.visible = false;
+  }
+
+  // The sphere inside the lamp head mimics the lightbulb: a warm emissive glow,
+  // kept moderate so the bloom pass reads it as a soft halo rather than a flare.
+  const bulb = objs.get("sphere");
+  if (bulb) {
+    bulb.visible = true;
+    const bulbMat = new THREE.MeshStandardMaterial({
+      color: 0xfff3d6,
+      emissive: 0xffc66e,
+      emissiveIntensity: 1.5,
+      roughness: 0.4,
+      metalness: 0,
+    });
+    bulb.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      m.material = bulbMat;
+      m.castShadow = false;
+      m.receiveShadow = false; // a light source shouldn't catch shadows
+    });
   }
 
   const poseOf = (cam?: THREE.PerspectiveCamera, fallback?: CameraPose): CameraPose => {

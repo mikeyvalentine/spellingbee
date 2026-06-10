@@ -521,35 +521,11 @@ export function setupBee(opts: BeeOpts): BeeStage {
     });
   };
 
-  // The desk-lamp spotlight doubles as the lobby host light. Its dialed-in stage
-  // pool is a short throw (~1.4u, steep decay) that only reads with someone in
-  // the beam — so in the lobby it swings to the host at the front, with gentler
-  // decay + a tighter cone to survive the ~3× longer throw. A match restores the
-  // baked speller-stage values.
-  const spot = classroom.lights.spot;
-  const spotStage = spot && {
-    target: spot.target.position.clone(),
-    intensity: spot.intensity, distance: spot.distance,
-    angle: spot.angle, decay: spot.decay,
-  };
-  const aimSpotAtHost = () => {
-    if (!spot) return;
-    spot.target.position.set(classroom.hostSpot.pos.x, 1.2, classroom.hostSpot.pos.z);
-    spot.intensity = 100; spot.distance = 9; spot.angle = 0.5; spot.decay = 1.4;
-  };
-  const aimSpotAtStage = () => {
-    if (!spot || !spotStage) return;
-    spot.target.position.copy(spotStage.target);
-    spot.intensity = spotStage.intensity; spot.distance = spotStage.distance;
-    spot.angle = spotStage.angle; spot.decay = spotStage.decay;
-  };
-
   const enterLobby = (queue: string[]) => {
     phase = "lobby";
     matchOver = false;
     lastAudioRound = -1; // reset the audio-dedup key between matches
     audio.setMusicEnabled(true); // background song plays in the lobby only
-    aimSpotAtHost(); // the desk lamp lights the host at the front while in the lobby
     cancelAnimationFrame(timerRaf);
     activeSpeller = null;
     amSpectator = false;
@@ -573,7 +549,6 @@ export function setupBee(opts: BeeOpts): BeeStage {
     lastAudioRound = -1; // the server resets its per-match round counter, so clear
                          // our audio-dedup key or the next match's word goes silent
     audio.setMusicEnabled(false); // silence the lobby song during the match
-    aimSpotAtStage(); // lamp spotlight back on the speller stage
     seatOrder = order.length ? order : seatOrder;
     amSpectator = order.length > 0 && !order.includes(localId);
     setSpec(amSpectator);
