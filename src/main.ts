@@ -110,7 +110,12 @@ async function main(): Promise<void> {
   avatars.setModel(localId, avatars.pickUnusedModel());
   if (latestParticipants.length) avatars.sync(latestParticipants);
 
-  match = setupBee({ net, localId, getName, camera, scene, avatars, classroom, audio, callRoomKey: source.roomKey, debug: !inDiscord });
+  match = setupBee({
+    net, localId, getName, camera, scene, avatars, classroom, audio,
+    callRoomKey: source.roomKey,
+    isUiFocused: () => clipboard.isFocused(), // calm the lobby free-look while the clipboard is up
+    debug: !inDiscord,
+  });
   for (const m of pending) match.handle(m); // replay anything that arrived early
   pending.length = 0;
 

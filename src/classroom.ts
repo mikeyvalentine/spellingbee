@@ -60,6 +60,8 @@ export interface Classroom {
   lobbyCam: CameraPose; // view while in the lobby
   matchCam: CameraPose; // fixed front view during a match
   seats: Seat[]; // per-player seating, indexed by join order
+  seatCams: CameraPose[]; // per-seat POV camera poses ('player', 'player.1' …), indexed like seats
+  hostSpot: Seat; // where the host stands in the lobby (the lobby-camera spot, facing the class)
   seatOffset: THREE.Vector3; // mutable offset applied to all seated avatars (debug)
   seatOffsets: THREE.Vector3[]; // per-seat fine-tune offset, indexed like seats (debug)
   spellerPos: THREE.Vector3; // where the active speller stands
@@ -123,6 +125,8 @@ export async function loadClassroom(scene: THREE.Scene): Promise<Classroom> {
     lobbyCam: layout.lobbyCam,
     matchCam: layout.matchCam,
     seats: layout.seats,
+    seatCams: layout.seatCams,
+    hostSpot: layout.hostSpot,
     seatOffsets: layout.seats.map((_, i) => new THREE.Vector3(...(SEAT_OFFSETS[i] ?? [0, 0, 0]))),
     seatOffset: new THREE.Vector3(0, 1, -0.3), // tuned via the debug panel
     spellerPos: layout.spellerPos,
@@ -172,6 +176,8 @@ interface ClassroomLayout {
   lobbyCam: CameraPose;
   matchCam: CameraPose;
   seats: Seat[];
+  seatCams: CameraPose[];
+  hostSpot: Seat;
   spellerPos: THREE.Vector3;
   lights: RoomLights;
 }
@@ -249,8 +255,20 @@ function buildFromGlb(root: THREE.Object3D, board: Chalkboard, stats: StatsBoard
   }
   const present = seatCams.filter(Boolean);
   const seats = present.map(seatOf);
+  const seatPoses = present.map((c) => poseOf(c)); // full per-seat POVs (lobby free-look)
   const matchCam = poseOf(present[0]);
   const lobbyCam = poseOf(cams.get("lobby"), matchCam);
+  // The host stands at the lobby camera — the "teacher spot" — facing the class.
+  const lobbyCamObj = cams.get("lobby");
+  const hostSpot = lobbyCamObj
+    ? seatOf(lobbyCamObj)
+    : {
+        pos: new THREE.Vector3(lobbyCam.pos.x, 0, lobbyCam.pos.z),
+        yaw: (() => {
+          const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(lobbyCam.quat);
+          return Math.atan2(fwd.x, fwd.z);
+        })(),
+      };
 
   const spellerPos = SPELLER_POS.clone();
 
@@ -261,7 +279,7 @@ function buildFromGlb(root: THREE.Object3D, board: Chalkboard, stats: StatsBoard
   // Stats plane on the secondary (tall, narrow) board off to the side.
   mountStatsBoard(root, stats, mainCx);
 
-  return { root, lobbyCam, matchCam, seats, spellerPos, lights };
+  return { root, lobbyCam, matchCam, seats, seatCams: seatPoses, hostSpot, spellerPos, lights };
 }
 
 function buildLights(root: THREE.Object3D, objs: Map<string, THREE.Object3D>): RoomLights {
@@ -503,8 +521,13 @@ function buildProcedural(board: Chalkboard): ClassroomLayout {
     const z = i < 4 ? 0.5 : -1.2;
     seats.push({ pos: new THREE.Vector3(x, 0, z), yaw: 0 });
   }
+  // Eye-height POV at each seat, looking toward the board wall.
+  const seatCams = seats.map((s) =>
+    mk(new THREE.Vector3(s.pos.x, 1.55, s.pos.z), new THREE.Vector3(s.pos.x * 0.4, 1.8, 8))
+  );
+  const hostSpot: Seat = { pos: new THREE.Vector3(0, 0, 4), yaw: Math.PI };
 
-  return { root, lobbyCam, matchCam, seats, spellerPos: new THREE.Vector3(0, 0, 6), lights: { front: light } };
+  return { root, lobbyCam, matchCam, seats, seatCams, hostSpot, spellerPos: new THREE.Vector3(0, 0, 6), lights: { front: light } };
 }
 
 // ---------------------------------------------------------------------------

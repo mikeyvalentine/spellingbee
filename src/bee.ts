@@ -15,6 +15,7 @@ interface BeeOpts {
   classroom: Classroom;
   audio: AudioBus; // master audio bus (TTS + clicks route to its sfx node)
   callRoomKey: string; // this client's home room, to return to on "leave match"
+  isUiFocused?: () => boolean; // the lobby clipboard is up — eases the free-look back to center
   debug?: boolean; // mock/dev: re-apply seat/speller transforms each frame (live sliders)
 }
 
@@ -60,6 +61,7 @@ const tierColor = (t: string) =>
 export function setupBee(opts: BeeOpts): BeeStage {
   const { net, localId, getName, camera, scene, avatars, classroom, audio, callRoomKey } = opts;
   const debug = !!opts.debug;
+  const uiFocused = opts.isUiFocused ?? (() => false);
 
   // ---------- HUD elements ----------
   const hud = document.getElementById("match-hud")!;
@@ -450,6 +452,10 @@ export function setupBee(opts: BeeOpts): BeeStage {
     av.rotation.y = seat.yaw;
   };
 
+  // Lobby seating skips the host (they stand at the front, at the lobby camera):
+  // the first NON-host player takes the 'player' seat, the next 'player.1', etc.
+  const lobbySeatIdx = (id: string) => seatOrder.filter((p) => p !== hostId).indexOf(id);
+
   const seatPlayers = () => {
     avatars.setAllVisible(false);
     seatOrder.forEach((id, i) => {
@@ -474,12 +480,34 @@ export function setupBee(opts: BeeOpts): BeeStage {
         av.visible = true;
         return;
       }
-      const seat = classroom.seats[i];
-      if (!seat || (phase === "match" && i === 0)) {
-        av.visible = false; // no seat, or this is the match-camera seat
+      if (phase === "match") {
+        const seat = classroom.seats[i];
+        if (!seat || i === 0) {
+          av.visible = false; // no seat, or this is the match-camera seat
+          return;
+        }
+        placeSeated(av, i);
+        av.visible = true;
         return;
       }
-      placeSeated(av, i);
+      // ---- lobby: independent POVs ----
+      if (id === localId) {
+        av.visible = false; // the local camera looks out of this avatar's head
+        return;
+      }
+      if (id === hostId) {
+        av.position.copy(classroom.hostSpot.pos); // host stands at the front, facing the class
+        av.rotation.y = classroom.hostSpot.yaw;
+        av.visible = true;
+        return;
+      }
+      const si = lobbySeatIdx(id);
+      const seat = classroom.seats[si];
+      if (!seat) {
+        av.visible = false; // more players than seat cameras
+        return;
+      }
+      placeSeated(av, si);
       av.visible = true;
     });
   };
@@ -855,39 +883,88 @@ export function setupBee(opts: BeeOpts): BeeStage {
     }
   };
 
-  // ---- subtle camera life: cursor parallax (both cams) + idle "breathing" bob
-  // (match only). Applied on top of the base pose every frame. ----
+  // Per-player POV: the match keeps the shared front camera; in the lobby the
+  // host looks from the front (the lobby cam) and every other player looks out
+  // of their own seat camera ('player', 'player.1' … by non-host join order).
+  const basePose = (): CameraPose => {
+    if (phase === "match") return classroom.matchCam;
+    if (localId === hostId) return classroom.lobbyCam;
+    const i = lobbySeatIdx(localId);
+    return (i >= 0 && classroom.seatCams[i]) || classroom.lobbyCam;
+  };
+
+  // ---- camera life, applied on top of the base pose every frame ----
+  // Lobby: full free-look — the view sweeps toward the cursor (desktop) or
+  // follows a one-finger drag (touch). Match: idle "breathing" bob + a subtle
+  // cursor parallax (unchanged this pass).
   let targetMx = 0, targetMy = 0; // cursor in NDC [-1,1]
   let curMx = 0, curMy = 0; // eased toward the target
   let bobT = 0;
   let turnTilt = 0; // 0..1 eased; on the local speller's touch turn, tilt down for the keyboard
-  const MAX_YAW = 0.045, MAX_PITCH = 0.03; // cursor-look amounts (radians)
+  const MAX_YAW = 0.045, MAX_PITCH = 0.03; // match cursor-look amounts (radians)
   const BOB_Y = 0.014, BOB_X = 0.008; // breathing translation (world units)
   const TURN_TILT = 0.16; // downward pitch on the speller's touch turn (radians)
+  // Lobby free-look range: cursor at the screen edge (or a full-width drag) = full
+  // sweep. Down gets more travel than up — the room sits mostly below eye line.
+  const LOOK_YAW = 1.9; // radians (~109°) each way
+  const LOOK_PITCH_UP = 0.45, LOOK_PITCH_DOWN = 0.7;
+  let lookTX = 0, lookTY = 0; // free-look target, -1..1 (touch drags write here)
+  let lookX = 0, lookY = 0; // eased
+  let lookGain = 1; // eases to 0 while the clipboard is up, so it reads calmly
   window.addEventListener("pointermove", (e) => {
     targetMx = (e.clientX / window.innerWidth) * 2 - 1;
     targetMy = (e.clientY / window.innerHeight) * 2 - 1;
   });
   const applyCameraLife = (dt: number) => {
-    // Breathing bob (match only): a gentle up/down + side sway along the camera's
-    // own axes, two slightly different frequencies so it doesn't feel mechanical.
-    if (phase === "match") {
-      bobT += dt;
-      camera.translateY(Math.sin(bobT * 1.1) * BOB_Y);
-      camera.translateX(Math.sin(bobT * 0.73) * BOB_X);
+    if (phase !== "match") {
+      // Lobby free-look. The clipboard is camera-anchored (clipboard.ts composes
+      // its matrix from the camera's each frame, AFTER this runs), so it stays
+      // glued to the same screen spot no matter where the player looks.
+      if (!isTouch) { lookTX = targetMx; lookTY = targetMy; }
+      lookGain += ((uiFocused() ? 0 : 1) - lookGain) * Math.min(1, dt * 4);
+      lookX += (lookTX - lookX) * Math.min(1, dt * 5);
+      lookY += (lookTY - lookY) * Math.min(1, dt * 5);
+      camera.rotateY(-lookX * LOOK_YAW * lookGain);
+      camera.rotateX(-lookY * (lookY > 0 ? LOOK_PITCH_DOWN : LOOK_PITCH_UP) * lookGain);
+      return;
     }
+    // Breathing bob: a gentle up/down + side sway along the camera's own axes,
+    // two slightly different frequencies so it doesn't feel mechanical.
+    bobT += dt;
+    camera.translateY(Math.sin(bobT * 1.1) * BOB_Y);
+    camera.translateX(Math.sin(bobT * 0.73) * BOB_X);
     // On the local speller's turn (touch), ease the view DOWN so the word rises
     // above the on-screen keyboard. (Looking down lifts the wall board in frame.)
-    const tiltTarget = isTouch && phase === "match" && amSpeller && !answered && !amSpectator ? 1 : 0;
+    const tiltTarget = isTouch && amSpeller && !answered && !amSpectator ? 1 : 0;
     turnTilt += (tiltTarget - turnTilt) * Math.min(1, dt * 6);
     if (turnTilt > 0.001) camera.rotateX(-turnTilt * TURN_TILT);
-    // Cursor parallax (both cams): look slightly toward the cursor — right of the
-    // page pans the view right, etc. Eased so it glides rather than snaps.
+    // Cursor parallax: look slightly toward the cursor, eased so it glides.
     curMx += (targetMx - curMx) * Math.min(1, dt * 5);
     curMy += (targetMy - curMy) * Math.min(1, dt * 5);
     camera.rotateY(-curMx * MAX_YAW);
     camera.rotateX(-curMy * MAX_PITCH);
   };
+
+  // Touch: a one-finger drag on the 3D scene looks around (lobby only). The drag
+  // "grabs the world": dragging right swings the view left. DOM overlays (the
+  // clipboard tap-zone, panels, buttons) sit above the canvas and keep their taps.
+  if (isTouch) {
+    let dragId: number | null = null, dragLX = 0, dragLY = 0;
+    const clampLook = (v: number) => Math.max(-1, Math.min(1, v));
+    sceneCanvas.addEventListener("pointerdown", (e) => {
+      if (phase !== "lobby") return;
+      dragId = e.pointerId; dragLX = e.clientX; dragLY = e.clientY;
+    });
+    window.addEventListener("pointermove", (e) => {
+      if (dragId !== e.pointerId || phase !== "lobby") return;
+      lookTX = clampLook(lookTX - ((e.clientX - dragLX) * 2.4) / window.innerWidth);
+      lookTY = clampLook(lookTY - ((e.clientY - dragLY) * 2.4) / window.innerHeight);
+      dragLX = e.clientX; dragLY = e.clientY;
+    });
+    const endDrag = (e: PointerEvent) => { if (dragId === e.pointerId) dragId = null; };
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
+  }
 
   // Project the board's 4 corners to screen space to pin the Replay/Confirm
   // buttons. The camera now moves each frame (bob/parallax), so this recomputes
@@ -920,8 +997,8 @@ export function setupBee(opts: BeeOpts): BeeStage {
 
   return {
     update: (dt: number) => {
-      applyCamera(phase === "match" ? classroom.matchCam : classroom.lobbyCam);
-      applyCameraLife(dt); // breathing bob (match) + cursor parallax (both)
+      applyCamera(basePose()); // per-player POV (host = front, others = their seat)
+      applyCameraLife(dt); // lobby free-look · match bob + parallax
       tomato.update(dt); // advance any in-flight thrown tomatoes
 
       // Seats + speller are placed once by seatPlayers() on each state change; only
@@ -930,7 +1007,15 @@ export function setupBee(opts: BeeOpts): BeeStage {
         seatOrder.forEach((id, i) => {
           if (phase === "match" && (id === activeSpeller || i === 0)) return;
           const av = avatars.get(id);
-          if (av && av.visible) placeSeated(av, i);
+          if (!av || !av.visible) return;
+          if (phase === "match") { placeSeated(av, i); return; }
+          if (id === hostId) {
+            av.position.copy(classroom.hostSpot.pos);
+            av.rotation.y = classroom.hostSpot.yaw;
+            return;
+          }
+          const si = lobbySeatIdx(id);
+          if (classroom.seats[si]) placeSeated(av, si);
         });
         if (phase === "match" && activeSpeller) {
           const sp = avatars.get(activeSpeller);
