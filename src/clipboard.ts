@@ -65,8 +65,14 @@ function buildPlaceholder(): { group: THREE.Group; paper: THREE.Mesh } {
   tab.position.set(0, 0.9, 0.07);
   group.add(tab);
 
-  group.renderOrder = 999; // draw on top of the room
-  group.traverse((o) => { (o as THREE.Mesh).renderOrder = 999; });
+  // View-model: draw on top of the room without depth-testing it — the per-seat
+  // POVs park the camera right behind a desk, which would otherwise occlude the
+  // peeking clipboard. With depth test off, explicit back-to-front renderOrder
+  // steps keep the board → paper → clip stacking correct.
+  [board, paper, bar, tab].forEach((o, i) => {
+    o.renderOrder = 999 + i;
+    (o.material as THREE.Material).depthTest = false;
+  });
   return { group, paper };
 }
 
