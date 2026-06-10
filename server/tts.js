@@ -139,12 +139,22 @@ async function eltts(text, voiceId = elevenVoiceId) {
   return toB64(await res.arrayBuffer()); // base64 MP3
 }
 
-// Synthesize one phrase with the active provider; returns base64 MP3.
+// Synthesize one phrase with the active provider; returns base64 MP3. A failing
+// non-Google provider falls back to Google — a worse voice beats a silent word
+// (e.g. ElevenLabs blocks free-tier API calls from datacenter IPs, so it can
+// work in local dev yet fail from the deployed Worker).
 async function speak(text) {
-  switch (activeProvider()) {
-    case "elevenlabs": return eltts(text);
-    case "qwen": return (await qtts(text)).b64;
-    default: return gtts(text);
+  const provider = activeProvider();
+  try {
+    switch (provider) {
+      case "elevenlabs": return await eltts(text);
+      case "qwen": return (await qtts(text)).b64;
+      default: return await gtts(text);
+    }
+  } catch (e) {
+    if (provider === "google") throw e;
+    console.error(`[tts] ${provider} failed (${e.message}); falling back to Google`);
+    return gtts(text);
   }
 }
 
