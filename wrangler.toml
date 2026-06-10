@@ -30,9 +30,13 @@ tag = "v2"
 new_sqlite_classes = ["Matchmaker"]
 
 # Non-secret config. The Discord *Client ID* is public (it's also baked into the
-# client bundle). Secrets — DISCORD_CLIENT_SECRET and GOOGLE_TTS_API_KEY — are NOT
-# here; set them with `wrangler secret put <NAME>` (or .dev.vars for local dev).
+# client bundle). Secrets — DISCORD_CLIENT_SECRET, GOOGLE_TTS_API_KEY and
+# ELEVENLABS_API_KEY — are NOT here; set them with `wrangler secret put <NAME>`
+# (or .dev.vars for local dev). ElevenLabs is the active TTS once its key is set
+# (Google stays the fallback); see server/tts.js activeProvider().
 [vars]
 DISCORD_CLIENT_ID = "1513352712400404520"
 GOOGLE_TTS_VOICE = "en-US-Neural2-J"
 GOOGLE_TTS_RATE = "0.9"
+ELEVENLABS_VOICE_ID = "pNInz6obpgDQGcFmaJgB"
+ELEVENLABS_MODEL = "eleven_multilingual_v2"
