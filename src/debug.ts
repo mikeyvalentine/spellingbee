@@ -183,7 +183,8 @@ export function setupDebug(classroom: Classroom, bloom?: BloomPass | null): void
   // Qwen3-TTS, back-to-back, so the rare-word pronunciation can be judged directly.
   // Qwen runs via fal.ai — needs FAL_KEY set (.dev.vars locally / wrangler secret).
   const HARD_WORDS = ["seraglio", "wapiti", "chamois", "quinoa", "colonel", "gnocchi", "onomatopoeia"];
-  const playOnce = (text: string, provider: "google" | "qwen", voice?: string) =>
+  type Provider = "google" | "qwen" | "elevenlabs";
+  const playOnce = (text: string, provider: Provider, voice?: string) =>
     new Promise<void>((resolve) => {
       const qs = new URLSearchParams({ provider, text });
       if (voice) qs.set("voice", voice);
@@ -194,13 +195,15 @@ export function setupDebug(classroom: Classroom, bloom?: BloomPass | null): void
     });
   const playAB = async (word: string) => {
     await playOnce(`${word}.`, "google", lastVoice); // A: Google (current voice)
-    await playOnce(`${word}.`, "qwen"); // B: Qwen3-TTS
+    await playOnce(`${word}.`, "elevenlabs"); // B: ElevenLabs (the new game voice)
   };
   groups.push({
-    title: "Voice A/B — Google → Qwen (hard words)",
+    title: "Voice A/B — Google → ElevenLabs (hard words)",
     sliders: [],
     buttons: [
       ...HARD_WORDS.map((w) => ({ label: `🔊 ${w}`, onClick: () => void playAB(w) })),
+      { label: "— ElevenLabs only —", onClick: () => {} },
+      ...HARD_WORDS.map((w) => ({ label: `🎙 ${w} (11L)`, onClick: () => void playOnce(`${w}.`, "elevenlabs") })),
       { label: "— Qwen only —", onClick: () => {} },
       ...HARD_WORDS.map((w) => ({ label: `🅱 ${w} (Qwen)`, onClick: () => void playOnce(`${w}.`, "qwen") })),
     ],

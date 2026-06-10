@@ -21,20 +21,41 @@ let RATE = Number(ENV.GOOGLE_TTS_RATE || 0.9); // a touch slow for clarity
 let currentVoice = ENV.GOOGLE_TTS_VOICE || "en-US-Neural2-J";
 let apiKey = ENV.GOOGLE_TTS_API_KEY || "";
 
+// ElevenLabs — the active game voice once its key is configured (see activeProvider).
+let elevenKey = ENV.ELEVENLABS_API_KEY || "";
+let elevenVoiceId = ENV.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM"; // "Rachel" — clear default
+let elevenModel = ENV.ELEVENLABS_MODEL || "eleven_multilingual_v2"; // or eleven_flash_v2_5 (faster/cheaper)
+// Up to 3 "<id>:<version>" pronunciation-dictionary locators to hard-fix words the
+// model mangles (comma-separated; version optional). e.g. "abc123,def456:7".
+let elevenPronos = ENV.ELEVENLABS_PRONO_DICTS || "";
+
+// Optional explicit provider override ("google" | "elevenlabs" | "qwen"). When
+// unset, ElevenLabs wins if its key is present, else Google. So configuring the
+// key is all it takes to "switch to ElevenLabs".
+let providerOverride = (ENV.TTS_PROVIDER || "").toLowerCase();
+const activeProvider = () => providerOverride || (elevenKey ? "elevenlabs" : "google");
+
 // Qwen3-TTS (Apache-2.0) via fal.ai, used only for the debug A/B voice preview so
-// its rare-word pronunciation can be judged against Google before any real swap.
+// its rare-word pronunciation can be judged against the others.
 let falKey = ENV.FAL_KEY || "";
 let qwenVoice = ENV.QWEN_TTS_VOICE || "Ryan"; // an American-English male voice
 const QWEN_MODEL = ENV.QWEN_TTS_MODEL || "fal-ai/qwen-3-tts/text-to-speech/1.7b";
 
 // Set credentials/voice/rate at runtime (used by the Cloudflare Worker, which
-// passes its env bindings). Safe to call multiple times.
-export const configureTts = ({ apiKey: k, voice, rate, falKey: fk, qwenVoice: qv } = {}) => {
+// passes its env bindings). Safe to call multiple times. Clears the audio cache
+// when anything affecting the rendered audio changes.
+export const configureTts = ({ apiKey: k, voice, rate, falKey: fk, qwenVoice: qv,
+  elevenKey: ek, elevenVoiceId: ev, elevenModel: em, elevenPronos: ep, provider } = {}) => {
   if (k) apiKey = k;
   if (voice) currentVoice = voice;
   if (rate != null && rate !== "") RATE = Number(rate);
   if (fk) falKey = fk;
   if (qv) qwenVoice = qv;
+  if (ek && ek !== elevenKey) { elevenKey = ek; cache.clear(); }
+  if (ev && ev !== elevenVoiceId) { elevenVoiceId = ev; cache.clear(); }
+  if (em && em !== elevenModel) { elevenModel = em; cache.clear(); }
+  if (ep != null && ep !== elevenPronos) { elevenPronos = ep; cache.clear(); }
+  if (provider != null && provider !== "") providerOverride = String(provider).toLowerCase();
 };
 
 // base64 of an ArrayBuffer, working in both Node (Buffer) and the Worker (btoa).
@@ -85,12 +106,50 @@ async function gtts(text, voice = currentVoice) {
   return data.audioContent; // base64 MP3
 }
 
+// ElevenLabs TTS. Returns base64 MP3, same shape as gtts(). Pronunciation
+// dictionaries (if configured) are applied in order to hard-fix mangled words.
+async function eltts(text, voiceId = elevenVoiceId) {
+  if (!elevenKey) throw new Error("ELEVENLABS_API_KEY is not set");
+  const body = {
+    text,
+    model_id: elevenModel,
+    voice_settings: { stability: 0.5, similarity_boost: 0.75, speed: Math.max(0.7, Math.min(1.2, RATE)) },
+  };
+  const locators = elevenPronos
+    .split(",").map((s) => s.trim()).filter(Boolean)
+    .slice(0, 3)
+    .map((s) => {
+      const [id, version_id] = s.split(":");
+      return version_id ? { pronunciation_dictionary_id: id, version_id } : { pronunciation_dictionary_id: id };
+    });
+  if (locators.length) body.pronunciation_dictionary_locators = locators;
+  const res = await fetch(
+    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`,
+    {
+      method: "POST",
+      headers: { "xi-api-key": elevenKey, "Content-Type": "application/json", Accept: "audio/mpeg" },
+      body: JSON.stringify(body),
+    }
+  );
+  if (!res.ok) throw new Error(`ElevenLabs ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  return toB64(await res.arrayBuffer()); // base64 MP3
+}
+
+// Synthesize one phrase with the active provider; returns base64 MP3.
+async function speak(text) {
+  switch (activeProvider()) {
+    case "elevenlabs": return eltts(text);
+    case "qwen": return (await qtts(text)).b64;
+    default: return gtts(text);
+  }
+}
+
 export async function synth(word) {
   if (cache.has(word)) return cache.get(word);
   try {
     const [wav, wavWord] = await Promise.all([
-      gtts(`Your word is, ${word}.`),
-      gtts(`${word}.`),
+      speak(`Your word is, ${word}.`),
+      speak(`${word}.`),
     ]);
     const out = { wav, ms: 0, wavWord };
     cache.set(word, out);
@@ -120,9 +179,10 @@ async function qtts(text, voice = qwenVoice) {
   return { b64: toB64(await a.arrayBuffer()), mime: data.audio.content_type || "audio/mpeg" };
 }
 
-// Debug A/B preview: synthesize `text` with either provider. Returns { b64, mime }.
+// Debug A/B preview: synthesize `text` with a chosen provider. Returns { b64, mime }.
 export async function previewAudio(text, { provider = "google", voice } = {}) {
   if (provider === "qwen") return qtts(text, voice);
+  if (provider === "elevenlabs") return { b64: await eltts(text, voice || elevenVoiceId), mime: "audio/mpeg" };
   return { b64: await gtts(text, voice || currentVoice), mime: "audio/mpeg" };
 }
 

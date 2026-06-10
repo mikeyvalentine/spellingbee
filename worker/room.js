@@ -23,6 +23,11 @@ export class BeeRoom {
       apiKey: env.GOOGLE_TTS_API_KEY,
       voice: env.GOOGLE_TTS_VOICE,
       rate: env.GOOGLE_TTS_RATE,
+      elevenKey: env.ELEVENLABS_API_KEY,
+      elevenVoiceId: env.ELEVENLABS_VOICE_ID,
+      elevenModel: env.ELEVENLABS_MODEL,
+      elevenPronos: env.ELEVENLABS_PRONO_DICTS,
+      provider: env.TTS_PROVIDER,
     });
 
     this.players = new Map(); // ws -> { id, model }

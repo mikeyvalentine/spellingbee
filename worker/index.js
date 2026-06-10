@@ -71,9 +71,13 @@ async function handleVoicePreview(url, env) {
     rate: env.GOOGLE_TTS_RATE,
     falKey: env.FAL_KEY,
     qwenVoice: env.QWEN_TTS_VOICE,
+    elevenKey: env.ELEVENLABS_API_KEY,
+    elevenVoiceId: env.ELEVENLABS_VOICE_ID,
+    elevenModel: env.ELEVENLABS_MODEL,
+    elevenPronos: env.ELEVENLABS_PRONO_DICTS,
   });
   try {
-    // Google still needs an explicit voice; Qwen uses its configured default.
+    // Google still needs an explicit voice; Qwen/ElevenLabs use configured defaults.
     if (provider === "google" && !voice) return new Response("missing voice", { status: 400 });
     const phrase = text || "Your word is, lagoon.";
     const { b64, mime } = await previewAudio(phrase, { provider, voice });
