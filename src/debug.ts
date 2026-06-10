@@ -148,6 +148,25 @@ export function setupDebug(classroom: Classroom, bloom?: BloomPass | null): void
       offset: [round(classroom.seatOffset.x), round(classroom.seatOffset.y), round(classroom.seatOffset.z)],
     }),
   });
+  // Lobby camera (the host POV). X/Z also drag the hostSpot along — the host's
+  // avatar stands at the camera — so the two never drift apart. Y is camera-only
+  // (the avatar stays on the floor). applyCamera copies the pose every frame and
+  // the debug loop re-places the host avatar, so changes are live.
+  groups.push({
+    title: "Lobby camera (host POV + avatar)",
+    sliders: [
+      { label: "pos x", min: -10, max: 10, step: 0.05, get: () => classroom.lobbyCam.pos.x,
+        set: (n) => { classroom.lobbyCam.pos.x = n; classroom.hostSpot.pos.x = n; } },
+      { label: "pos y", min: 0, max: 6, step: 0.05, get: () => classroom.lobbyCam.pos.y,
+        set: (n) => { classroom.lobbyCam.pos.y = n; } },
+      { label: "pos z", min: -12, max: 12, step: 0.05, get: () => classroom.lobbyCam.pos.z,
+        set: (n) => { classroom.lobbyCam.pos.z = n; classroom.hostSpot.pos.z = n; } },
+    ],
+    read: () => ({
+      pos: [round(classroom.lobbyCam.pos.x), round(classroom.lobbyCam.pos.y), round(classroom.lobbyCam.pos.z)],
+      hostSpot: [round(classroom.hostSpot.pos.x), round(classroom.hostSpot.pos.z)],
+    }),
+  });
   groups.push(pointLightGroup("Front point light", lights.front));
   if (lights.back) groups.push(pointLightGroup("Back point light", lights.back));
   if (lights.window instanceof THREE.RectAreaLight) groups.push(rectLightGroup("Window area light", lights.window));
