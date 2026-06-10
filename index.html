@@ -208,6 +208,28 @@
       .menu-item.disabled:hover { background: none; }
       .menu-sep { height: 1px; background: #232a38; margin: 6px 4px; }
 
+      /* ---------- Settings modal (audio volumes) ---------- */
+      #settings-panel {
+        position: fixed; inset: 0; z-index: 45; display: none;
+        align-items: center; justify-content: center; background: rgba(0,0,0,0.55);
+      }
+      #settings-panel.on { display: flex; }
+      #settings-panel .set-card {
+        width: min(360px, 90vw); background: #161b25; border: 1px solid #2a3344;
+        border-radius: 14px; padding: 16px 18px 18px; color: #e9edf5;
+        box-shadow: 0 16px 50px rgba(0,0,0,0.6);
+      }
+      .set-head {
+        display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;
+        font: 700 20px "ABC Stefan Simple", system-ui, sans-serif;
+      }
+      .set-head button { background: none; border: 0; color: #9aa4b2; font-size: 18px; cursor: pointer; padding: 4px 6px; }
+      .set-group-label { color: #8a93a3; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin: 4px 0 2px; }
+      .set-row { display: grid; grid-template-columns: 64px 1fr 46px; align-items: center; gap: 10px; margin: 12px 0; }
+      .set-row label { font-size: 14px; color: #cdd6e4; }
+      .set-row input[type="range"] { width: 100%; accent-color: var(--bee); cursor: pointer; }
+      .set-row span { text-align: right; color: var(--bee); font-variant-numeric: tabular-nums; font-size: 13px; }
+
       /* ---------- Power-up item menu (2D, bottom-right) ---------- */
       #item-menu {
         position: fixed; right: 22px; bottom: 22px; z-index: 17; display: none;
@@ -590,6 +612,17 @@
     <!-- Top-right universal menu (always visible) -->
     <button id="menu-btn" title="Menu" aria-label="Menu">☰</button>
     <div id="menu-panel"><div id="menu-items"></div></div>
+
+    <!-- Settings modal: audio volumes -->
+    <div id="settings-panel">
+      <div class="set-card">
+        <div class="set-head"><span>⚙ Settings</span><button id="set-close" title="Close">✕</button></div>
+        <div class="set-group-label">Audio</div>
+        <div class="set-row"><label>Master</label><input type="range" id="set-master" min="0" max="100"><span id="set-master-val"></span></div>
+        <div class="set-row"><label>Music</label><input type="range" id="set-music" min="0" max="100"><span id="set-music-val"></span></div>
+        <div class="set-row"><label>Sounds</label><input type="range" id="set-sfx" min="0" max="100"><span id="set-sfx-val"></span></div>
+      </div>
+    </div>
 
     <!-- Power-up item menu (bottom-right). Hand-drawn icons. -->
     <div id="item-menu" aria-hidden="true">

@@ -5,6 +5,7 @@ import { connectNet } from "./net";
 import { setupLobby } from "./lobby";
 import { setupBee } from "./bee";
 import { makeClipboard } from "./clipboard";
+import { makeAudioBus } from "./audio";
 import type { RoomSource, Participant } from "./types";
 
 const CHARACTER_URLS = [
@@ -27,6 +28,13 @@ async function main(): Promise<void> {
   const avatars = new AvatarManager(scene);
   const clipboard = makeClipboard(camera); // 3D lobby clipboard (placeholder mesh)
   scene.add(clipboard.group);
+
+  // Master audio bus (music + sfx). Autoplay is blocked until a user gesture, so
+  // unlock + start the looping background song on the first interaction.
+  const audio = makeAudioBus();
+  const startAudio = () => { audio.startMusic("/assets/song.m4a"); };
+  window.addEventListener("pointerdown", startAudio, { once: true });
+  window.addEventListener("keydown", startAudio, { once: true });
   const modeEl = document.getElementById("mode")!;
   const inDiscord = isInDiscord();
   modeEl.textContent = inDiscord ? "Discord mode" : "Mock mode (local dev)";
@@ -102,7 +110,7 @@ async function main(): Promise<void> {
   avatars.setModel(localId, avatars.pickUnusedModel());
   if (latestParticipants.length) avatars.sync(latestParticipants);
 
-  match = setupBee({ net, localId, getName, camera, scene, avatars, classroom, callRoomKey: source.roomKey, debug: !inDiscord });
+  match = setupBee({ net, localId, getName, camera, scene, avatars, classroom, audio, callRoomKey: source.roomKey, debug: !inDiscord });
   for (const m of pending) match.handle(m); // replay anything that arrived early
   pending.length = 0;
 

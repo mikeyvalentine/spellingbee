@@ -3,6 +3,7 @@ import type { NetClient } from "./net";
 import type { AvatarManager } from "./avatars";
 import type { Classroom, CameraPose } from "./classroom";
 import { makeTomatoFlights } from "./tomato";
+import type { AudioBus } from "./audio";
 
 interface BeeOpts {
   net: NetClient;
@@ -12,6 +13,7 @@ interface BeeOpts {
   scene: THREE.Scene; // tomato flights live in the scene
   avatars: AvatarManager;
   classroom: Classroom;
+  audio: AudioBus; // master audio bus (TTS + clicks route to its sfx node)
   callRoomKey: string; // this client's home room, to return to on "leave match"
   debug?: boolean; // mock/dev: re-apply seat/speller transforms each frame (live sliders)
 }
@@ -56,7 +58,7 @@ const tierColor = (t: string) =>
   t === "easy" ? "#f4f1e8" : t === "medium" ? "#ffd23b" : "#ff6b6b";
 
 export function setupBee(opts: BeeOpts): BeeStage {
-  const { net, localId, getName, camera, scene, avatars, classroom, callRoomKey } = opts;
+  const { net, localId, getName, camera, scene, avatars, classroom, audio, callRoomKey } = opts;
   const debug = !!opts.debug;
 
   // ---------- HUD elements ----------
@@ -324,11 +326,35 @@ export function setupBee(opts: BeeOpts): BeeStage {
       out.push(`<button class="menu-item danger" id="mi-leave">🚪 Leave match</button>`);
       out.push(`<div class="menu-sep"></div>`);
     }
-    out.push(`<div class="menu-item disabled">⚙ Settings — coming soon</div>`);
+    out.push(`<button class="menu-item" id="mi-settings">⚙ Settings</button>`);
     menuItems.innerHTML = out.join("");
     document.getElementById("mi-spectate")?.addEventListener("click", () => { becomeSpectator(); closeMenu(); });
     document.getElementById("mi-leave")?.addEventListener("click", () => { leaveMatch(); closeMenu(); });
+    document.getElementById("mi-settings")?.addEventListener("click", () => { openSettings(); closeMenu(); });
   };
+
+  // ---- settings panel: master / music / sounds volume ----
+  const settingsPanel = document.getElementById("settings-panel")!;
+  const settingsClose = document.getElementById("set-close")!;
+  const bindVol = (id: string, get: () => number, set: (v: number) => void) => {
+    const el = document.getElementById(id) as HTMLInputElement;
+    const val = document.getElementById(`${id}-val`)!;
+    el.value = String(Math.round(get() * 100));
+    val.textContent = `${el.value}%`;
+    el.addEventListener("input", () => {
+      const v = parseInt(el.value, 10);
+      set(v / 100);
+      val.textContent = `${v}%`;
+    });
+  };
+  const v = audio.volumes();
+  bindVol("set-master", () => v.master, audio.setMaster);
+  bindVol("set-music", () => v.music, audio.setMusic);
+  bindVol("set-sfx", () => v.sfx, audio.setSfx);
+  const openSettings = () => { audio.resume(); settingsPanel.classList.add("on"); };
+  const closeSettings = () => settingsPanel.classList.remove("on");
+  settingsClose.addEventListener("click", closeSettings);
+  settingsPanel.addEventListener("click", (e) => { if (e.target === settingsPanel) closeSettings(); });
 
   menuBtn.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -345,30 +371,22 @@ export function setupBee(opts: BeeOpts): BeeStage {
 
 
   // ---------- audio (server-synthesized narration) ----------
-  let audioCtx: AudioContext | null = null;
+  // All audio runs through the shared bus (audio.ctx + audio.sfx) so the volume
+  // sliders apply. TTS + clicks are SFX.
+  const actx = audio.ctx;
   let curSource: AudioBufferSourceNode | null = null;
   let lastBuffer: AudioBuffer | null = null; // the trimmed word, for Replay
-  const ensureAudio = () => (audioCtx ??= new AudioContext());
   const playBuffer = (buf: AudioBuffer) => {
-    const c = ensureAudio();
     if (curSource) {
-      try {
-        curSource.stop();
-      } catch {
-        /* already stopped */
-      }
+      try { curSource.stop(); } catch { /* already stopped */ }
     }
-    const s = c.createBufferSource();
-    s.buffer = buf;
-    s.connect(c.destination);
-    s.start();
-    curSource = s;
+    curSource = audio.playSfx(buf);
   };
   const decodeB64 = (b64: string) => {
     const bin = atob(b64);
     const arr = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-    return ensureAudio().decodeAudioData(arr.buffer);
+    return actx.decodeAudioData(arr.buffer);
   };
   const playB64 = (b64: string) => decodeB64(b64).then(playBuffer).catch(() => {});
   const bankB64 = (b64: string) =>
@@ -378,43 +396,32 @@ export function setupBee(opts: BeeOpts): BeeStage {
       })
       .catch(() => {});
 
-  // Short keyboard "tick" (a filtered noise burst). `deep` = a lower, duller thunk
-  // for backspace (low-pass instead of high-pass, a touch longer + louder).
+  // Short keyboard "tick" (a filtered noise burst), routed through the sfx bus.
+  // `deep` = a lower, duller thunk for backspace (low-pass, a touch longer/louder).
   const playClick = (deep = false) => {
     try {
-      const c = ensureAudio();
-      const len = Math.floor(c.sampleRate * (deep ? 0.035 : 0.02));
-      const buf = c.createBuffer(1, len, c.sampleRate);
+      const len = Math.floor(actx.sampleRate * (deep ? 0.035 : 0.02));
+      const buf = actx.createBuffer(1, len, actx.sampleRate);
       const d = buf.getChannelData(0);
       const decay = deep ? 2 : 3;
       for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
-      const src = c.createBufferSource();
+      const src = actx.createBufferSource();
       src.buffer = buf;
-      const filt = c.createBiquadFilter();
+      const filt = actx.createBiquadFilter();
       filt.type = deep ? "lowpass" : "highpass";
       filt.frequency.value = deep ? 900 : 1600;
-      const g = c.createGain();
+      const g = actx.createGain();
       g.gain.value = deep ? 0.2 : 0.14;
       src.connect(filt);
       filt.connect(g);
-      g.connect(c.destination);
+      g.connect(audio.sfx); // -> sfx bus
       src.start();
     } catch {
       /* ignore */
     }
   };
   // Browsers require a gesture before audio; resume on first interaction.
-  window.addEventListener(
-    "pointerdown",
-    () => {
-      try {
-        ensureAudio().resume();
-      } catch {
-        /* ignore */
-      }
-    },
-    { once: true }
-  );
+  window.addEventListener("pointerdown", () => audio.resume(), { once: true });
 
   // ---------- timer ----------
   const countdown = (durationMs: number) => {
