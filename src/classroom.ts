@@ -258,6 +258,7 @@ function buildFromGlb(root: THREE.Object3D, board: Chalkboard, stats: StatsBoard
   const seatPoses = present.map((c) => poseOf(c)); // full per-seat POVs (lobby free-look)
   const matchCam = poseOf(present[0]);
   const lobbyCam = poseOf(cams.get("lobby"), matchCam);
+  lobbyCam.fov = matchCam.fov; // host POV uses the same FOV as the seat cameras
   // The host stands at the lobby camera — the "teacher spot" — facing the class.
   const lobbyCamObj = cams.get("lobby");
   const hostSpot = lobbyCamObj
