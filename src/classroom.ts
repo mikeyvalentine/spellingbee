@@ -261,6 +261,8 @@ function buildFromGlb(root: THREE.Object3D, board: Chalkboard, stats: StatsBoard
   lobbyCam.fov = matchCam.fov; // host POV uses the same FOV as the seat cameras
   // The GLB's lobby cam aims a touch low — start the host view pitched up a bit.
   lobbyCam.quat.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0.14, 0, 0)));
+  // Host position dialed in live via the debug panel (overrides the GLB cam spot).
+  lobbyCam.pos.set(0.27, 2.47, 6.65);
   // The host stands at the lobby camera — the "teacher spot" — facing the class.
   const lobbyCamObj = cams.get("lobby");
   const hostSpot = lobbyCamObj
@@ -272,6 +274,7 @@ function buildFromGlb(root: THREE.Object3D, board: Chalkboard, stats: StatsBoard
           return Math.atan2(fwd.x, fwd.z);
         })(),
       };
+  hostSpot.pos.set(lobbyCam.pos.x, 0, lobbyCam.pos.z); // stand exactly under the dialed-in camera
 
   const spellerPos = SPELLER_POS.clone();
 
