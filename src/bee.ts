@@ -905,9 +905,10 @@ export function setupBee(opts: BeeOpts): BeeStage {
   const BOB_Y = 0.014, BOB_X = 0.008; // breathing translation (world units)
   const TURN_TILT = 0.16; // downward pitch on the speller's touch turn (radians)
   // Lobby free-look range: cursor at the screen edge (or a full-width drag) = full
-  // sweep. Down gets more travel than up — the room sits mostly below eye line.
-  const LOOK_YAW = 1.9; // radians (~109°) each way
-  const LOOK_PITCH_UP = 0.45, LOOK_PITCH_DOWN = 0.7;
+  // sweep. Kept tight (~30% of a full sweep) so players glance around their seat
+  // rather than spin the room. Down gets a bit more travel than up.
+  const LOOK_YAW = 0.6; // radians (~34°) each way
+  const LOOK_PITCH_UP = 0.15, LOOK_PITCH_DOWN = 0.24;
   let lookTX = 0, lookTY = 0; // free-look target, -1..1 (touch drags write here)
   let lookX = 0, lookY = 0; // eased
   let lookGain = 1; // eases to 0 while the clipboard is up, so it reads calmly
