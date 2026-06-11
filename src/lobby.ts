@@ -44,6 +44,7 @@ export function setupLobby(opts: LobbyOpts): LobbyController {
   const roomEl = $("cp-room"), countEl = $("cp-count"), cdEl = $("cp-cd");
   const settingsEl = $("cp-settings"), modeSel = $("cp-mode") as HTMLSelectElement;
   const maxEl = $("cp-max"), maxDec = $("cp-max-dec") as HTMLButtonElement, maxInc = $("cp-max-inc") as HTMLButtonElement;
+  const botsEl = $("cp-bots-n"), botDec = $("cp-bot-dec") as HTMLButtonElement, botInc = $("cp-bot-inc") as HTMLButtonElement;
   const visEl = $("cp-vis"), rosterEl = $("cp-roster"), actionsEl = $("cp-actions");
   const findEl = $("cp-find"), listEl = $("cp-list");
   const quickBtn = $("cp-quick"), createBtn = $("cp-create"), refreshBtn = $("cp-refresh");
@@ -94,6 +95,10 @@ export function setupLobby(opts: LobbyOpts): LobbyController {
   });
   maxDec.addEventListener("click", () => { if (isHost()) net.sendBee({ type: "bee_settings", maxPlayers: Math.max(2, maxPlayers - 1) }); });
   maxInc.addEventListener("click", () => { if (isHost()) net.sendBee({ type: "bee_settings", maxPlayers: Math.min(12, maxPlayers + 1) }); });
+  // Bots stepper: add/remove one bot at a time (host, or anyone in mock dev).
+  const canBots = () => isMock || isHost();
+  botInc.addEventListener("click", () => { if (canBots()) net.sendBee({ type: "bee_addbots", n: 1 }); });
+  botDec.addEventListener("click", () => { if (canBots()) net.sendBee({ type: "bee_removebot" }); });
   for (const b of Array.from(visEl.querySelectorAll<HTMLElement>("button"))) {
     b.addEventListener("click", () => {
       const v = b.dataset.v;
@@ -173,6 +178,11 @@ export function setupLobby(opts: LobbyOpts): LobbyController {
     modeSel.disabled = !host;
     maxEl.textContent = String(maxPlayers);
     maxDec.disabled = !host; maxInc.disabled = !host;
+    const botCount = queue.filter((id) => id.startsWith("bot:")).length;
+    botsEl.textContent = String(botCount);
+    const botsAllowed = isMock || host;
+    botInc.disabled = !botsAllowed;
+    botDec.disabled = !botsAllowed || botCount === 0;
     for (const b of Array.from(visEl.querySelectorAll<HTMLElement>("button"))) {
       const on = (b.dataset.v === "public") === inPublic;
       b.classList.toggle("on", on);
@@ -195,7 +205,6 @@ export function setupLobby(opts: LobbyOpts): LobbyController {
       else btns.push(`<button class="cpb" id="cp-join">Join</button>`);
       if (host) btns.push(`<button class="cpb" id="cp-start">Start match</button>`);
       if (inQueue && !host) btns.push(`<button class="cpb sec" id="cp-claimhost">Become host</button>`);
-      if (isMock || host) btns.push(`<button class="cpb sec" id="cp-bots">+ Bots</button>`);
     }
     actionsEl.innerHTML = btns.join("");
     $("cp-leave")?.addEventListener("click", leavePublic);
@@ -203,7 +212,6 @@ export function setupLobby(opts: LobbyOpts): LobbyController {
     $("cp-join")?.addEventListener("click", () => net.sendBee({ type: "bee_join" }));
     $("cp-start")?.addEventListener("click", () => net.sendBee({ type: "bee_begin", mode: selected }));
     $("cp-claimhost")?.addEventListener("click", () => net.sendBee({ type: "bee_claimhost" }));
-    $("cp-bots")?.addEventListener("click", () => net.sendBee({ type: "bee_addbots", n: 4 }));
   };
 
   return {

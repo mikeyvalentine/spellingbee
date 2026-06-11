@@ -321,6 +321,20 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
     }
   }, 2200);
 
+  // Remove the most recently added bot (lobby only).
+  const removeBot = () => {
+    if (phase !== "lobby") return;
+    for (let i = queue.length - 1; i >= 0; i--) {
+      if (!isBot(queue[i])) continue;
+      const id = queue[i];
+      queue.splice(i, 1);
+      bots.delete(id);
+      ready.delete(id);
+      sendLobby();
+      return;
+    }
+  };
+
   const misspell = (w) => {
     if (w.length <= 3) return w + "x";
     const i = 1 + Math.floor(Math.random() * (w.length - 2));
@@ -634,6 +648,9 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
           break;
         case "bee_addbots":
           addBots(m.n || 4);
+          break;
+        case "bee_removebot":
+          removeBot();
           break;
         case "bee_claimhost":
           // Any player in the lobby can take over as host.
