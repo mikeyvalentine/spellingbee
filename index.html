@@ -317,9 +317,11 @@
          the (now distant) 3D chalkboard. */
       #spell-hud {
         position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
-        z-index: 18; display: none; align-items: center; gap: 16px;
-        max-width: min(92vw, 760px);
-        padding: 16px 20px 18px; border-radius: 18px;
+        z-index: 18; display: none; align-items: center; justify-content: center;
+        max-width: min(92vw, 820px);
+        /* Symmetric side padding reserves room for the absolutely-positioned
+           replay/confirm buttons, so the word sits dead-center in the card. */
+        padding: 16px 118px 18px; border-radius: 18px;
         background: rgba(12,15,22,0.80); border: 1px solid #2a3344;
         box-shadow: 0 12px 40px rgba(0,0,0,0.55);
       }
@@ -347,23 +349,27 @@
         border-radius: 3px; background: rgba(255,255,255,0.1); overflow: hidden;
       }
       #sh-timerfill { height: 100%; width: 100%; border-radius: 3px; background: hsl(120, 65%, 55%); }
-      /* Chalk-styled controls — same look as the old board-pinned buttons. */
+      /* Chalk-styled controls — same look as the old board-pinned buttons.
+         Pinned to the card's left/right edges so the word stays centered. */
       #sh-replay, #sh-check {
-        background: none; border: 0; padding: 0 4px; cursor: pointer; flex: 0 0 auto;
+        position: absolute; top: 50%; transform: translateY(-50%);
+        background: none; border: 0; padding: 0 4px; cursor: pointer;
         -webkit-tap-highlight-color: transparent;
         text-shadow: 0 2px 5px rgba(0,0,0,0.5);
         transition: transform 0.12s ease;
       }
       #sh-replay {
+        left: 18px;
         color: rgba(244,241,232,0.55);
         font: 600 19px "ABC Stefan Simple", system-ui, sans-serif;
       }
       #sh-check {
+        right: 22px;
         color: #f4f1e8;
         font: 700 36px "ABC Stefan Simple", system-ui, sans-serif;
       }
-      #sh-replay:hover, #sh-check:hover { transform: scale(1.1); }
-      #sh-replay:active, #sh-check:active { transform: translateY(1px); }
+      #sh-replay:hover, #sh-check:hover { transform: translateY(-50%) scale(1.12); }
+      #sh-replay:active, #sh-check:active { transform: translateY(calc(-50% + 1px)); }
       /* Locked-in / showing a result: the controls + timer step aside. */
       #spell-hud.result #sh-replay, #spell-hud.result #sh-check, #spell-hud.result #sh-timer { visibility: hidden; }
       /* Result coloring (mirrors the chalkboard): green when right; red + a
