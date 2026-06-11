@@ -7,7 +7,7 @@ import wotc from "./wotc.json" with { type: "json" };
 import { synth } from "./tts.js";
 
 const ROUND_MS = 22000;
-const RESULT_MS = 2200; // pause between turns: ~500ms linger + char-by-char board erase, then next round
+const RESULT_MS = 3200; // pause between turns: result linger + board erase + a beat for the next speller's model to take the stage (desk POVs watch the swap)
 const OVER_MS = 3500; // post-match celebration before the lobby reopens
 
 // Words excluded from every pool: common HOMOPHONES (ambiguous when only heard,

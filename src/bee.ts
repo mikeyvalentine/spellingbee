@@ -178,22 +178,63 @@ export function setupBee(opts: BeeOpts): BeeStage {
   });
   document.body.appendChild(boardReplay);
 
-  // Checkmark at the chalkboard's bottom-RIGHT corner — confirms the speller's
-  // word (same as pressing Enter). Only shown to the speller, before they answer.
-  const boardCheck = document.createElement("button");
-  boardCheck.id = "board-check";
-  boardCheck.textContent = "✔";
-  boardCheck.title = "Confirm your word (Enter)";
-  Object.assign(boardCheck.style, {
-    position: "fixed", zIndex: "15", display: "none",
-    // Anchoring transform + hover live in CSS (#board-check).
-    background: "none", border: "0", padding: "0", cursor: "pointer",
-    color: "#f4f1e8", // white chalk
-    font: "700 32px 'ABC Stefan Simple', system-ui, sans-serif",
-    textShadow: "0 2px 5px rgba(0,0,0,0.5)",
-  } as any);
-  boardCheck.addEventListener("click", () => submit());
-  document.body.appendChild(boardCheck);
+  // ---- speller HUD (desk-POV near-field controls) ----
+  // The speller watches from their own desk now, so the word slots, countdown,
+  // replay and confirm live in this overlay (markup/CSS in index.html). On touch
+  // the on-screen keyboard's FABs + timer take over the buttons/bar roles.
+  const spellHud = document.getElementById("spell-hud")!;
+  const shSlots = document.getElementById("sh-slots")!;
+  const shTimerfill = document.getElementById("sh-timerfill") as HTMLElement;
+  const shReplay = document.getElementById("sh-replay")!;
+  const shCheck = document.getElementById("sh-check")!;
+  shReplay.addEventListener("click", () => { if (lastBuffer) playBuffer(lastBuffer); });
+  shCheck.addEventListener("click", () => submit());
+
+  // Golden-chalk aim now happens on the HUD slots (near-field) instead of the
+  // distant 3D board: desktop = click a pulsing slot to reveal; touch = tap a
+  // slot to arm it, tap the SAME slot again to confirm.
+  const onSlotTap = (i: number) => {
+    if (!chalkAiming || answered) return;
+    if (!isTouch || armedAim === i) {
+      net.sendBee({ type: "bee_chalk", index: i });
+      cancelAim();
+      return;
+    }
+    armedAim = i;
+    renderHud();
+  };
+
+  // Rebuild/update the HUD slot row from the slot model (letters, gold reveals,
+  // the blinking cursor, and any chalk-aim state).
+  const renderHud = () => {
+    if (!amSpeller) return;
+    while (shSlots.children.length > curLength) shSlots.lastChild!.remove();
+    while (shSlots.children.length < curLength) {
+      const idx = shSlots.children.length;
+      const s = document.createElement("span");
+      s.className = "sh-slot";
+      s.addEventListener("click", (e) => { e.stopPropagation(); onSlotTap(idx); });
+      shSlots.appendChild(s);
+    }
+    let cursorIdx = -1;
+    for (let i = 0; i < curLength; i++) if (!gold[i] && !slots[i]) { cursorIdx = i; break; }
+    for (let i = 0; i < curLength; i++) {
+      const el = shSlots.children[i] as HTMLElement;
+      const ch = gold[i] ?? slots[i] ?? "";
+      el.textContent = ch ? ch.toUpperCase() : " ";
+      el.className =
+        "sh-slot" +
+        (gold[i] ? " gold" : "") +
+        (!chalkAiming && i === cursorIdx && !answered ? " cursor" : "") +
+        (chalkAiming ? (armedAim === i ? " sel" : armedAim < 0 ? " aim" : "") : "");
+    }
+  };
+
+  const updateSpellHud = () => {
+    const show = phase === "match" && amSpeller && !answered && !amSpectator;
+    spellHud.classList.toggle("show", show);
+    if (show) renderHud();
+  };
 
   // ---- power-up item menu (2D, bottom-right) ----
   // The throw still launches a 3D tomato that everyone sees arc to the board.
@@ -214,13 +255,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
   const canChalk = () =>
     chalkVisible() && amSpeller && !answered && curLength > 0;
 
-  // NDC relative to the CANVAS rect (not the window) — on mobile/Discord the
-  // canvas may be offset by safe-area insets, so window-based coords miss the ray.
   const sceneCanvas = document.getElementById("app") as HTMLCanvasElement;
-  const ndcOf = (e: PointerEvent) => {
-    const r = sceneCanvas.getBoundingClientRect();
-    return [((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1] as const;
-  };
 
   const updateTomatoBtn = () => {
     itemTomato.style.display = tomatoVisible() ? "" : "none";
@@ -243,51 +278,19 @@ export function setupBee(opts: BeeOpts): BeeStage {
   // Tapping the chalk toggles aim mode (tap again to cancel without spending it).
   itemChalk.addEventListener("click", (e) => { e.stopPropagation(); if (chalkAiming) cancelAim(); else if (canChalk()) startAim(); });
 
-  // Chalk aim: tap the chalk → EVERY slot pulses ("pick any letter"). Tap one →
-  // only that slot pulses (armed). Tap it again → confirm + reveal.
+  // Chalk aim: tap the chalk → every HUD slot pulses ("pick any letter"). The
+  // pick + confirm interactions live on the HUD slots (see onSlotTap above) —
+  // the 3D board is too far/small to aim at from the desk POV.
   function startAim() {
     chalkAiming = true;
     armedAim = -1;
-    document.body.style.cursor = "crosshair";
-    // Mobile: pulse every slot to pick from. Desktop: no all-slots highlight —
-    // the oval just follows the cursor (hover) onto a single slot.
-    if (isTouch) classroom.setBoardAimAll();
-    else classroom.setBoardAim(-1);
+    renderHud();
   }
   function cancelAim() {
     chalkAiming = false;
     armedAim = -1;
-    classroom.setBoardAim(-1);
-    document.body.style.cursor = "";
+    renderHud();
   }
-
-  // These listen on the CANVAS (not window) — some webviews (Discord mobile)
-  // swallow window-level touch events, but the canvas under the finger still gets
-  // them. Desktop: hover narrows the pulse to the hovered slot; click confirms.
-  sceneCanvas.addEventListener("pointermove", (e) => {
-    if (!chalkAiming || isTouch) return;
-    const [x, y] = ndcOf(e);
-    const idx = classroom.boardSlotAt(x, y, camera);
-    classroom.setBoardAim(idx); // idx<0 clears the oval (no all-slots on desktop)
-    document.body.style.cursor = idx >= 0 ? "pointer" : "crosshair";
-  });
-  sceneCanvas.addEventListener("pointerdown", (e) => {
-    if (!chalkAiming) return;
-    const [x, y] = ndcOf(e);
-    const idx = classroom.boardSlotAt(x, y, camera);
-    if (isTouch) {
-      // First tap on a slot narrows to it; a second tap on the SAME slot confirms.
-      // Off-slot taps are ignored (tap the chalk again to cancel).
-      if (idx < 0) return;
-      if (idx === armedAim) { net.sendBee({ type: "bee_chalk", index: idx }); cancelAim(); }
-      else { armedAim = idx; classroom.setBoardAim(idx); }
-    } else {
-      // Desktop: the hover already narrowed the oval, so a click confirms.
-      if (idx >= 0) net.sendBee({ type: "bee_chalk", index: idx });
-      cancelAim();
-    }
-    e.stopPropagation();
-  });
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && chalkAiming) { cancelAim(); e.preventDefault(); }
   });
@@ -434,6 +437,8 @@ export function setupBee(opts: BeeOpts): BeeStage {
       const pct = `${frac * 100}%`;
       timerbar.style.width = pct;
       kbdTimerbar.style.width = pct; // mirror to the on-screen keyboard's timer
+      shTimerfill.style.width = pct; // mirror to the speller HUD's bar
+      shTimerfill.style.background = `hsl(${120 * frac}, 65%, 55%)`; // green → red
       if (frac > 0) timerRaf = requestAnimationFrame(tick);
     };
     tick();
@@ -461,11 +466,10 @@ export function setupBee(opts: BeeOpts): BeeStage {
   let myMatchSeat = -1; // index in the match order (match POV)
 
   // True when this client's POV is the shared front 'player' camera during a
-  // match: the active speller (watching their own model on stage) and non-seated
-  // spectators (not in the match order) use it. Everyone else watches from the
-  // seat camera of their (shuffled) match-order desk.
-  const onMatchCam = () =>
-    phase === "match" && (localId === activeSpeller || myMatchSeat < 0);
+  // match: only NON-SEATED spectators (not in the match order) use it now.
+  // Every seated player — including the active speller, who watches their own
+  // model on stage while typing via the HUD — looks out of their desk camera.
+  const onMatchCam = () => phase === "match" && myMatchSeat < 0;
 
   const seatPlayers = () => {
     const nonHosts = seatOrder.filter((p) => p !== hostId); // computed once, not per player
@@ -602,6 +606,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
   const pushGuess = () => {
     const shown = censor(boardText()); // positional, gold slots as "_"
     classroom.setBoardGuess(shown, curLength);
+    renderHud(); // the speller's near-field slot row mirrors every change
     // `n` = the player's real typed-letter count, so server WPM/accuracy ignores
     // gold reveals and "_" placeholders.
     net.sendBee({ type: "bee_key", text: shown, n: typedCount() });
@@ -667,6 +672,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
     hud.style.display = "none";
     hud.classList.remove("mobile-bar", "no-input");
     updateKeyboard();
+    updateSpellHud();
   };
 
   // Always-listening key capture for the speller (no focus/click required).
@@ -787,7 +793,9 @@ export function setupBee(opts: BeeOpts): BeeStage {
         aliveEl.textContent = "";
         timerbar.style.width = "100%";
         kbdTimerbar.style.width = "100%";
-        updateMatchHud(); // hide the legacy HUD; (re)show the on-screen keyboard on touch
+        shTimerfill.style.width = "100%";
+        shTimerfill.style.background = "hsl(120, 65%, 55%)";
+        updateMatchHud(); // hide the legacy HUD; (re)show the keyboard + speller HUD
         updateTomatoBtn(); // show the tomato to eligible waiting players
         break;
       }
@@ -824,6 +832,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
         classroom.clearBoardTimer();
         timerbar.style.width = "0%";
         kbdTimerbar.style.width = "0%";
+        shTimerfill.style.width = "0%";
         answered = true; // turn resolved — close the touch input row + keyboard
         updateMatchHud();
         if (isTouch) input.blur();
@@ -948,23 +957,27 @@ export function setupBee(opts: BeeOpts): BeeStage {
       // the camera's each frame, AFTER this runs), so it stays glued to the same
       // screen spot no matter where the player looks.
       if (!isTouch) { lookTX = targetMx; lookTY = targetMy; }
-      lookGain += ((uiFocused() ? 0 : 1) - lookGain) * Math.min(1, dt * 4);
+      // Damp the free-look to 30% on your own turn (the cursor doubles as the
+      // typing/HUD pointer), and to 0 while the clipboard is up.
+      const myTurn = phase === "match" && amSpeller && !answered && !amSpectator;
+      lookGain += ((uiFocused() ? 0 : myTurn ? 0.3 : 1) - lookGain) * Math.min(1, dt * 4);
       lookX += (lookTX - lookX) * Math.min(1, dt * 5);
       lookY += (lookTY - lookY) * Math.min(1, dt * 5);
       camera.rotateY(-lookX * LOOK_YAW * lookGain);
       camera.rotateX(-lookY * (lookY > 0 ? LOOK_PITCH_DOWN : LOOK_PITCH_UP) * lookGain);
+      // Touch: on your own turn, ease the view DOWN so the stage/board clears
+      // the on-screen keyboard (the speller is in this free-look branch now).
+      const tiltTarget = isTouch && myTurn ? 1 : 0;
+      turnTilt += (tiltTarget - turnTilt) * Math.min(1, dt * 6);
+      if (turnTilt > 0.001) camera.rotateX(-turnTilt * TURN_TILT);
       return;
     }
-    // Breathing bob: a gentle up/down + side sway along the camera's own axes,
-    // two slightly different frequencies so it doesn't feel mechanical.
+    // Shared front cam (non-seated spectators): breathing bob — a gentle
+    // up/down + side sway along the camera's own axes, two slightly different
+    // frequencies so it doesn't feel mechanical.
     bobT += dt;
     camera.translateY(Math.sin(bobT * 1.1) * BOB_Y);
     camera.translateX(Math.sin(bobT * 0.73) * BOB_X);
-    // On the local speller's turn (touch), ease the view DOWN so the word rises
-    // above the on-screen keyboard. (Looking down lifts the wall board in frame.)
-    const tiltTarget = isTouch && amSpeller && !answered && !amSpectator ? 1 : 0;
-    turnTilt += (tiltTarget - turnTilt) * Math.min(1, dt * 6);
-    if (turnTilt > 0.001) camera.rotateX(-turnTilt * TURN_TILT);
     // Cursor parallax: look slightly toward the cursor, eased so it glides.
     curMx += (targetMx - curMx) * Math.min(1, dt * 5);
     curMy += (targetMy - curMy) * Math.min(1, dt * 5);
@@ -1074,17 +1087,14 @@ export function setupBee(opts: BeeOpts): BeeStage {
         }
       }
 
-      // Pin the Replay (bottom-left) + the speller's Confirm checkmark
-      // (bottom-right) to the board's cached corners. On touch the slim match bar
-      // + keyboard handle these, so skip the floating ones.
-      if (phase === "match" && !isTouch && !matchOver) {
-        computeBoardCorners(); // camera bob/parallax moves each frame, so always recompute
+      // Pin the spectators' Replay to the board's bottom-left corner. The
+      // speller's replay/confirm live in the spell HUD now; on touch the
+      // keyboard FABs handle them, so skip the floating one entirely.
+      if (phase === "match" && !isTouch && !matchOver && !amSpeller) {
+        computeBoardCorners(); // camera free-look moves each frame, so always recompute
         pin(boardReplay, blPos);
-        if (amSpeller && !answered) pin(boardCheck, brPos);
-        else boardCheck.style.display = "none";
       } else {
         boardReplay.style.display = "none";
-        boardCheck.style.display = "none";
       }
     },
     handle,
