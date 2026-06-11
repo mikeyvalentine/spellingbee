@@ -467,8 +467,8 @@ export function setupBee(opts: BeeOpts): BeeStage {
 
   // True when this client's POV is the shared front 'player' camera during a
   // match: only NON-SEATED spectators (not in the match order) use it now.
-  // Every seated player — including the active speller, who watches their own
-  // model on stage while typing via the HUD — looks out of their desk camera.
+  // Seated players look out of their desk camera; the active speller goes
+  // first-person at the stage (see spellerPose).
   const onMatchCam = () => phase === "match" && myMatchSeat < 0;
 
   const seatPlayers = () => {
@@ -495,7 +495,9 @@ export function setupBee(opts: BeeOpts): BeeStage {
           classroom.matchCam.pos.x - av.position.x,
           classroom.matchCam.pos.z - av.position.z
         );
-        av.visible = true;
+        // Your own live turn is first person on stage — don't render inside your
+        // model's head. (At game over you watch your wave from your desk.)
+        av.visible = !(id === localId && !matchOver);
         return;
       }
       if (phase === "match") {
@@ -918,8 +920,32 @@ export function setupBee(opts: BeeOpts): BeeStage {
   // speller + non-seated spectators use the shared front 'player' cam (the
   // speller sees their own model on stage — unchanged); players waiting their
   // turn watch from the seat camera of their shuffled match-order desk.
+  // First-person stage POV for the active speller: the camera stands where
+  // their model does (the tuned currentturnplayerposition spot), at eye height,
+  // facing the class. Recomputed per frame so the debug speller sliders stay
+  // live; the pose object is reused (no per-frame allocation).
+  const SPELLER_EYE = 1.55; // eye height above the stand spot (× spellerScale)
+  const UP_AXIS = new THREE.Vector3(0, 1, 0);
+  const spellerCamPose: CameraPose = {
+    pos: new THREE.Vector3(),
+    quat: new THREE.Quaternion(),
+    fov: classroom.matchCam.fov,
+  };
+  const spellerPose = (): CameraPose => {
+    const p = classroom.spellerPos;
+    spellerCamPose.pos.set(p.x, p.y + SPELLER_EYE * classroom.spellerScale, p.z);
+    // The camera looks down -Z, so facing the class (toward the matchCam, like
+    // the model does) means the model's yaw + π.
+    const yaw = Math.atan2(classroom.matchCam.pos.x - p.x, classroom.matchCam.pos.z - p.z) + Math.PI;
+    spellerCamPose.quat.setFromAxisAngle(UP_AXIS, yaw);
+    return spellerCamPose;
+  };
+
   const basePose = (): CameraPose => {
     if (phase === "match") {
+      // Your live turn = first person on stage (the game-over wave is watched
+      // from your desk instead, so the winner sees their own celebration).
+      if (localId === activeSpeller && !matchOver) return spellerPose();
       if (onMatchCam()) return classroom.matchCam;
       return classroom.seatCams[myMatchSeat] || classroom.matchCam;
     }
