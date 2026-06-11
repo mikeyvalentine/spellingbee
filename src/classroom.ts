@@ -22,14 +22,14 @@ const SPELLER_POS = new THREE.Vector3(3.7, 0.9, 6.7);
 // Per-chair fine-tune offsets (tuned via the right-side debug panel), indexed
 // by join-order seat. Extra seats beyond this list default to zero.
 const SEAT_OFFSETS: [number, number, number][] = [
-  [0, -0.35, 0],
+  [0, 0.1, 0],
   [-0.15, 0.1, 0.2],
   [-0.45, -0.05, 0.2],
-  [0.45, -0.05, 0.2],
-  [0.15, -0.2, 0],
+  [0.45, -0.05, 0.55],
+  [0.15, -0.05, 0.2],
   [-0.15, -0.2, 0],
   [0, 0.1, 0],
-  [0, 0.1, 0],
+  [0.15, -0.05, -0.2],
 ];
 const BOARD_W = 4.4;
 const BOARD_H = 2.0;
