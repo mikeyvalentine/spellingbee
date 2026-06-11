@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 
 // The 3D environment, driven by public/assets/classroom.glb. Named markers:
@@ -111,7 +112,15 @@ export async function loadClassroom(scene: THREE.Scene): Promise<Classroom> {
   const stats = makeStatsBoard();
   let layout: ClassroomLayout;
   try {
-    const gltf = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(GLB_URL);
+    // The room is Draco-compressed (its dense scan geometry compresses ~4x
+    // better with Draco than meshopt); the character GLBs stay meshopt, so the
+    // loader carries both decoders. Decoder files live in public/draco/.
+    const draco = new DRACOLoader().setDecoderPath("/draco/");
+    const gltf = await new GLTFLoader()
+      .setMeshoptDecoder(MeshoptDecoder)
+      .setDRACOLoader(draco)
+      .loadAsync(GLB_URL);
+    draco.dispose(); // decoder workers are no longer needed once the room is in
     layout = buildFromGlb(gltf.scene, board, stats);
   } catch (e) {
     console.warn("classroom.glb not loaded, using procedural fallback:", e);
