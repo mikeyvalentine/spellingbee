@@ -158,20 +158,26 @@ async function speak(text) {
   }
 }
 
-export async function synth(word) {
+export function synth(word) {
+  // The PROMISE (not the result) is cached, so concurrent calls for the same
+  // word share one in-flight synthesis. beginTurn fires ~200ms after the
+  // match-start prewarm — caching only the finished result let the first word
+  // synthesize TWICE (4 concurrent requests trips ElevenLabs' free-tier
+  // concurrency limit → 401 → the Google fallback voice on word one).
   if (cache.has(word)) return cache.get(word);
-  try {
+  const p = (async () => {
     const [wav, wavWord] = await Promise.all([
       speak(`Your word is, ${word}.`),
       speak(`${word}.`),
     ]);
-    const out = { wav, ms: 0, wavWord };
-    cache.set(word, out);
-    return out;
-  } catch (e) {
+    return { wav, ms: 0, wavWord };
+  })();
+  cache.set(word, p);
+  p.catch((e) => {
     console.error("[tts] synth failed:", e.message);
-    throw e;
-  }
+    cache.delete(word); // don't cache failures — retry fresh next time
+  });
+  return p;
 }
 
 // Qwen3-TTS via fal.ai's synchronous endpoint. Returns base64 of the (MP3) audio.
