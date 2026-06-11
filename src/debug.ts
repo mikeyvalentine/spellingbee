@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { Classroom } from "./classroom";
+import type { AvatarManager } from "./avatars";
 
 // Dev-only floating panel of sliders for tuning the classroom lights and the
 // speller's transform live. Values can be copied out to bake back into code.
@@ -17,7 +18,7 @@ interface Group {
   title: string;
   sliders: Slider[];
   buttons?: { label: string; onClick: () => void }[];
-  read(): Record<string, unknown>; // for "Copy values"
+  read(): unknown; // for "Copy values"
 }
 
 const v3 = (label: string, v: THREE.Vector3): Slider[] => [
@@ -113,7 +114,7 @@ function spotLightGroup(title: string, l: THREE.SpotLight): Group {
 // just for a type) — UnrealBloomPass exposes these mutable props.
 interface BloomPass { strength: number; radius: number; threshold: number; }
 
-export function setupDebug(classroom: Classroom, bloom?: BloomPass | null): void {
+export function setupDebug(classroom: Classroom, avatars: AvatarManager, bloom?: BloomPass | null): void {
   const { lights } = classroom;
   const groups: Group[] = [];
 
@@ -229,22 +230,28 @@ export function setupDebug(classroom: Classroom, bloom?: BloomPass | null): void
     read: () => ({ hardWords: HARD_WORDS }),
   });
 
-  // Right-side panel: per-chair (per-seat) position offsets in the lobby.
-  const seatGroups: Group[] = classroom.seats.map((_, i) => ({
-    title: `Chair ${i + 1}`,
-    sliders: v3("pos", classroom.seatOffsets[i]),
-    read: () => ({
-      offset: [
-        round(classroom.seatOffsets[i].x),
-        round(classroom.seatOffsets[i].y),
-        round(classroom.seatOffsets[i].z),
+  // Right-side panel: per-MODEL seat offset (x = right, y = up, z = into the
+  // desk; applied seat-relative). One group per character. Copy values into
+  // avatars.ts MODEL_OFFSETS (keyed by name) to bake. Seat a model via bots /
+  // CHAIR_MODELS to see it; sliders move it live every frame in dev.
+  const modelGroups: Group[] = [];
+  for (let i = 0; i < avatars.modelCount; i++) {
+    const o = avatars.modelOffset(i);
+    const name = avatars.modelName(i);
+    modelGroups.push({
+      title: `${i}· ${name}`,
+      sliders: [
+        { label: "x →", min: -1, max: 1, step: 0.01, get: () => o.x, set: (n) => (o.x = n) },
+        { label: "y ↑", min: -0.5, max: 1.5, step: 0.01, get: () => o.y, set: (n) => (o.y = n) },
+        { label: "z fwd", min: -1, max: 1, step: 0.01, get: () => o.z, set: (n) => (o.z = n) },
       ],
-    }),
-  }));
+      read: () => [round(o.x), round(o.y), round(o.z)],
+    });
+  }
 
   const panels: HTMLElement[] = [];
   panels.push(buildPanel("debug-panel", "left", "⚙ Debug", groups));
-  if (seatGroups.length) panels.push(buildPanel("debug-seats", "right", "🪑 Lobby chairs", seatGroups));
+  if (modelGroups.length) panels.push(buildPanel("debug-models", "right", "🧍 Model seat offset", modelGroups));
 
   // Debug panels are hidden by default; press H to toggle them.
   let shown = false;

@@ -30,7 +30,10 @@ export interface BeeStage {
 // clients (bots would otherwise be assigned random models per client).
 // Model order matches CHARACTER_URLS in main.ts:
 // 0 Astronaut · 1 Blue Demon · 2 Cactoro · 3 Demon · 4 Fish · 5 Ninja · 6 Zombie
-const CHAIR_MODELS = [0, 4, 5, 3, 1, 2, 6, 0];
+// Fixed model per join-order chair (8 chairs). To tune the OTHER models' seat
+// fit with bots, temporarily change these indices to the model you want seated
+// (model index = order in CHARACTER_URLS; there are more models than chairs).
+const CHAIR_MODELS = [0, 1, 2, 3, 4, 5, 6, 7];
 
 // Mask profanity in displayed guesses (board + spectators). Unambiguous terms
 // only, so real words like "class"/"assignment" aren't false-flagged.
@@ -516,12 +519,22 @@ export function setupBee(opts: BeeOpts): BeeStage {
   // Seat every player at their join-order camera. The active speller (match only)
   // is pulled to the front spot instead; the avatar occupying the fixed match
   // camera (seat 0) is hidden so we don't render inside its head.
-  const placeSeated = (av: THREE.Object3D, i: number) => {
+  const placeSeated = (av: THREE.Object3D, i: number, id?: string) => {
     const seat = classroom.seats[i];
     if (!seat) return;
     av.position.copy(seat.pos).add(classroom.seatOffset);
     const per = classroom.seatOffsets[i];
     if (per) av.position.add(per);
+    // Per-model seating fit: x/z are seat-relative (rotated by the seat's facing
+    // so +z is into the desk), y is straight up. Lets each character sit right
+    // in any chair regardless of its modeled origin/pose.
+    if (id) {
+      const mo = avatars.seatOffsetFor(id);
+      const c = Math.cos(seat.yaw), s = Math.sin(seat.yaw);
+      av.position.x += mo.x * c + mo.z * s;
+      av.position.y += mo.y;
+      av.position.z += mo.z * c - mo.x * s;
+    }
     av.rotation.y = seat.yaw;
   };
 
@@ -576,7 +589,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
           av.visible = false;
           return;
         }
-        placeSeated(av, i);
+        placeSeated(av, i, id);
         av.visible = true;
         return;
       }
@@ -597,7 +610,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
         av.visible = false; // more players than seat cameras
         return;
       }
-      placeSeated(av, si);
+      placeSeated(av, si, id);
       av.visible = true;
     });
   };
@@ -1187,14 +1200,14 @@ export function setupBee(opts: BeeOpts): BeeStage {
           if (phase === "match" && id === activeSpeller) return;
           const av = avatars.get(id);
           if (!av || !av.visible) return; // hidden = own body / desk-0 under the shared cam
-          if (phase === "match") { placeSeated(av, i); return; }
+          if (phase === "match") { placeSeated(av, i, id); return; }
           if (id === hostId) {
             av.position.copy(classroom.hostSpot.pos);
             av.rotation.y = classroom.hostSpot.yaw;
             return;
           }
           const si = lobbySeatIdx(id);
-          if (classroom.seats[si]) placeSeated(av, si);
+          if (classroom.seats[si]) placeSeated(av, si, id);
         });
         if (phase === "match" && activeSpeller) {
           const sp = avatars.get(activeSpeller);

@@ -8,6 +8,9 @@ import { makeClipboard } from "./clipboard";
 import { makeAudioBus } from "./audio";
 import type { RoomSource, Participant } from "./types";
 
+// Model index = position in this list (CHAIR_MODELS, the bot roster, and the
+// per-model seat offsets all index into it — keep the original 7 first so their
+// indices stay stable, append new characters).
 const CHARACTER_URLS = [
   "/characters/Astronaut.glb",
   "/characters/Blue Demon.glb",
@@ -16,6 +19,14 @@ const CHARACTER_URLS = [
   "/characters/Fish.glb",
   "/characters/Ninja.glb",
   "/characters/Zombie.glb",
+  "/characters/Alien.glb",
+  "/characters/Big arm.glb",
+  "/characters/Bunny.glb",
+  "/characters/Dino.glb",
+  "/characters/Frog.glb",
+  "/characters/Monkroose.glb",
+  "/characters/Yeti.glb",
+  "/characters/Zombie2.glb",
 ];
 
 // Discord loads the Activity in an iframe with a `frame_id` query param. Inlined
@@ -122,7 +133,7 @@ async function main(): Promise<void> {
   // Dev-only: debug hook + tuning slider panel (lazy — kept out of the prod bundle).
   if (!inDiscord) {
     (window as any).__dbg = { match, classroom, lobby, localId, renderer, scene, camera, avatars, bloom };
-    import("./debug").then((m) => m.setupDebug(classroom, bloom)).catch(() => {});
+    import("./debug").then((m) => m.setupDebug(classroom, avatars, bloom)).catch(() => {});
   }
 
   renderer.setAnimationLoop(() => {

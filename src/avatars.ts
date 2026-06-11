@@ -5,6 +5,19 @@ import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js
 import type { Participant } from "./types";
 
 const TARGET_HEIGHT = 1.7; // normalize every model to ~human height
+
+// Per-model SEATING offset (x = right, y = up, z = forward toward the desk),
+// applied on top of the chair position so each character sits correctly in a
+// chair regardless of its modeled origin/pose. Standing poses (the active
+// speller on stage, the lobby host) ignore this — their feet-on-floor offset is
+// computed from the bounding box. Keyed by model name (filename without .glb).
+// Tune live with the debug "Model seat offset" sliders, then bake values here.
+const MODEL_OFFSETS: Record<string, [number, number, number]> = {
+  // e.g. "Yeti": [0, 0.12, -0.1],
+};
+const modelNameFromUrl = (url: string) =>
+  decodeURIComponent(url.split("/").pop() || "").replace(/\.glb$/i, "");
+const ZERO_OFFSET = new THREE.Vector3();
 // These models' forward axis vs +Z. If they walk backwards, flip to Math.PI.
 const MODEL_FACING_OFFSET = 0;
 const CROSSFADE = 0.2; // seconds to blend between animation states
@@ -105,6 +118,8 @@ interface Avatar {
 
 export class AvatarManager {
   private models: ModelTemplate[] = [];
+  private modelNames: string[] = []; // display name per model index (from filename)
+  private modelOffsets: THREE.Vector3[] = []; // per-model seating offset (debug-tunable)
   private avatars = new Map<string, Avatar>();
   private assigned = new Map<string, number>(); // userId -> model index
   private spawn = new THREE.Vector3(0, 0, 0);
@@ -152,10 +167,36 @@ export class AvatarManager {
         return { scene, clips, scale, offset };
       })
     );
+    this.modelNames = urls.map(modelNameFromUrl);
+    this.modelOffsets = this.modelNames.map(
+      (n) => new THREE.Vector3(...(MODEL_OFFSETS[n] ?? [0, 0, 0]))
+    );
   }
 
   get modelCount(): number {
     return this.models.length;
+  }
+
+  modelName(i: number): string {
+    return this.modelNames[i] ?? `model ${i}`;
+  }
+
+  /** The model index currently assigned to a player (or -1). */
+  modelIndexOf(id: string): number {
+    return this.assigned.get(id) ?? -1;
+  }
+
+  /** Live per-model seating offset (mutate via the returned Vector3, or setModelOffset). */
+  modelOffset(i: number): THREE.Vector3 {
+    return this.modelOffsets[i] ?? new THREE.Vector3();
+  }
+  setModelOffset(i: number, x: number, y: number, z: number): void {
+    if (this.modelOffsets[i]) this.modelOffsets[i].set(x, y, z);
+  }
+  /** The seating offset for the model assigned to `id` (zero if none). */
+  seatOffsetFor(id: string): THREE.Vector3 {
+    const i = this.assigned.get(id);
+    return (i != null && this.modelOffsets[i]) || ZERO_OFFSET;
   }
 
   setLayout(spawn: THREE.Vector3, ringRadius: number): void {
