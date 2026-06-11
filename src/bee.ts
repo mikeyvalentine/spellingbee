@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { NetClient } from "./net";
 import type { AvatarManager } from "./avatars";
+import { genSplatBlobs, drawSplatShape } from "./classroom";
 import type { Classroom, CameraPose } from "./classroom";
 import { makeTomatoFlights } from "./tomato";
 import type { AudioBus } from "./audio";
@@ -187,8 +188,58 @@ export function setupBee(opts: BeeOpts): BeeStage {
   const shTimerfill = document.getElementById("sh-timerfill") as HTMLElement;
   const shReplay = document.getElementById("sh-replay")!;
   const shCheck = document.getElementById("sh-check")!;
+  const correctWord = document.getElementById("correct-word")!;
   shReplay.addEventListener("click", () => { if (lastBuffer) playBuffer(lastBuffer); });
   shCheck.addEventListener("click", () => submit());
+
+  // Result state mirrored from the board: green when right, red + struck when
+  // wrong (with the correct word center-screen). Lives until the next turn.
+  let hudResult: { correct: boolean; answer: string } | null = null;
+
+  // Tomato face splat — in first person the tomato hits YOUR view: the board's
+  // splat artwork is drawn on a DOM canvas over the HUD slots, covering all but
+  // the last 2 letters (same coverage as the 3D board splat).
+  let faceSplatEl: HTMLCanvasElement | null = null;
+  let faceSplatTimers: number[] = [];
+  let flinch = 0; // 1 → 0 decaying first-person impact jolt
+  const clearFaceSplat = () => {
+    for (const t of faceSplatTimers) clearTimeout(t);
+    faceSplatTimers = [];
+    faceSplatEl?.remove();
+    faceSplatEl = null;
+  };
+  const showFaceSplat = (durationMs: number) => {
+    clearFaceSplat();
+    const n = shSlots.children.length;
+    const coverN = Math.max(0, n - 2); // leave the last 2 letters readable
+    if (coverN <= 0 || !spellHud.classList.contains("show")) return;
+    const first = (shSlots.children[0] as HTMLElement).getBoundingClientRect();
+    const last = (shSlots.children[coverN - 1] as HTMLElement).getBoundingClientRect();
+    const span = Math.max(48, last.right - first.left);
+    const cx = first.left + span / 2;
+    const cy = (first.top + first.bottom) / 2;
+    const w = span * 1.4;
+    const h = Math.max(first.height * 3.4, span * 0.55);
+    const c = document.createElement("canvas");
+    c.id = "face-splat";
+    c.width = Math.ceil(w);
+    c.height = Math.ceil(h);
+    Object.assign(c.style, { left: `${cx - w / 2}px`, top: `${cy - h * 0.38}px`, width: `${w}px`, height: `${h}px` });
+    const g = c.getContext("2d")!;
+    g.translate(c.width / 2, c.height * 0.38); // main mass on the letters, drips below
+    drawSplatShape(g, c.width * 0.36, c.height * 0.3, genSplatBlobs());
+    document.body.appendChild(c);
+    requestAnimationFrame(() => { c.style.opacity = "0.97"; });
+    faceSplatEl = c;
+    flinch = 1; // impact jolt (applied in applyCameraLife)
+    const dur = Math.max(800, durationMs);
+    faceSplatTimers.push(window.setTimeout(() => {
+      if (faceSplatEl !== c) return;
+      c.style.transition = "opacity 0.55s ease";
+      c.style.opacity = "0";
+    }, dur - 550));
+    faceSplatTimers.push(window.setTimeout(() => { if (faceSplatEl === c) clearFaceSplat(); }, dur));
+  };
 
   // Golden-chalk aim now happens on the HUD slots (near-field) instead of the
   // distant 3D board: desktop = click a pulsing slot to reveal; touch = tap a
@@ -207,7 +258,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
   // Rebuild/update the HUD slot row from the slot model (letters, gold reveals,
   // the blinking cursor, and any chalk-aim state).
   const renderHud = () => {
-    if (!amSpeller) return;
+    if (!amSpeller && !hudResult) return; // result display outlives amSpeller
     while (shSlots.children.length > curLength) shSlots.lastChild!.remove();
     while (shSlots.children.length < curLength) {
       const idx = shSlots.children.length;
@@ -231,8 +282,14 @@ export function setupBee(opts: BeeOpts): BeeStage {
   };
 
   const updateSpellHud = () => {
-    const show = phase === "match" && amSpeller && !answered && !amSpectator;
+    // Live turn, OR holding the just-resolved result on screen until next turn.
+    const live = phase === "match" && !matchOver && amSpeller && !amSpectator;
+    const show = live || (phase === "match" && !matchOver && hudResult !== null);
     spellHud.classList.toggle("show", show);
+    spellHud.classList.toggle("result", answered || hudResult !== null);
+    spellHud.classList.toggle("ok", hudResult?.correct === true);
+    spellHud.classList.toggle("bad", hudResult?.correct === false);
+    correctWord.classList.toggle("show", show && hudResult?.correct === false);
     if (show) renderHud();
   };
 
@@ -538,6 +595,8 @@ export function setupBee(opts: BeeOpts): BeeStage {
     phase = "lobby";
     matchOver = false;
     lastAudioRound = -1; // reset the audio-dedup key between matches
+    hudResult = null;
+    clearFaceSplat();
     audio.setMusicEnabled(true); // background song plays in the lobby only
     cancelAnimationFrame(timerRaf);
     activeSpeller = null;
@@ -561,6 +620,8 @@ export function setupBee(opts: BeeOpts): BeeStage {
     matchOver = false;
     lastAudioRound = -1; // the server resets its per-match round counter, so clear
                          // our audio-dedup key or the next match's word goes silent
+    hudResult = null;
+    clearFaceSplat();
     audio.setMusicEnabled(false); // silence the lobby song during the match
     seatOrder = order.length ? order : seatOrder;
     amSpectator = order.length > 0 && !order.includes(localId);
@@ -725,7 +786,10 @@ export function setupBee(opts: BeeOpts): BeeStage {
 
       case "bee_splat": {
         const dur = m.durationMs ?? 4000;
-        const onLand = () => classroom.splatTomato(dur); // splat appears when it lands
+        const onLand = () => {
+          classroom.splatTomato(dur); // the 3D board splat (what spectators watch)
+          if (amSpeller && !answered) showFaceSplat(dur); // first person: it hits YOUR view
+        };
         // Launch a tomato arcing from the thrower toward the board, then splat.
         // Thrower sees it leave their own corner; everyone else sees it leave the
         // thrower's avatar. Unknown thrower (no avatar) → just splat, no flight.
@@ -767,6 +831,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
         curTierColor = tierColor(m.tier ?? "easy");
         amSpeller = m.spellerId === localId;
         answered = false;
+        hudResult = null; // the previous turn's result leaves with the new turn
         sizeSlots(); // fresh empty per-slot answer (typing is captured globally)
         lastBuffer = null; // word audio arrives via bee_audio
         aliveIds = m.alive ?? aliveIds;
@@ -774,6 +839,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
         if (chalkAiming) cancelAim();
         classroom.clearReveals();
         classroom.clearSplat(); // clear any splat from last turn
+        clearFaceSplat();
         seatPlayers();
         // Secondary board: current speller's name + (cumulative) accuracy, WPM resets.
         classroom.setStats(getName(m.spellerId), 0, m.accuracy ?? 100, m.spellerId === localId);
@@ -836,6 +902,13 @@ export function setupBee(opts: BeeOpts): BeeStage {
         kbdTimerbar.style.width = "0%";
         shTimerfill.style.width = "0%";
         answered = true; // turn resolved — close the touch input row + keyboard
+        // My word: mirror the board's verdict in the HUD (green, or red + the
+        // correct word center-screen) and hold it until the next turn starts.
+        if (m.spellerId === localId) {
+          hudResult = { correct: !!m.correct, answer: String(m.word || "") };
+          correctWord.textContent = String(m.word || "").toUpperCase();
+        }
+        clearFaceSplat(); // turn over — the face splat goes with the board's
         updateMatchHud();
         if (isTouch) input.blur();
         aliveIds = m.alive ?? aliveIds;
@@ -889,6 +962,8 @@ export function setupBee(opts: BeeOpts): BeeStage {
         classroom.clearStats();
         answered = true;
         aliveIds = [];
+        hudResult = null; // the game-over screen replaces any per-turn result
+        clearFaceSplat();
         // Showcase the winner: pull THEM to the front-stage spot (under the lamp
         // spotlight, replacing whoever was last up) and loop a celebratory wave.
         // seatPlayers() returns everyone else to their chairs.
@@ -996,6 +1071,13 @@ export function setupBee(opts: BeeOpts): BeeStage {
       const tiltTarget = isTouch && myTurn ? 1 : 0;
       turnTilt += (tiltTarget - turnTilt) * Math.min(1, dt * 6);
       if (turnTilt > 0.001) camera.rotateX(-turnTilt * TURN_TILT);
+      // Tomato-impact flinch: a short decaying first-person jolt (~0.3s).
+      if (flinch > 0.003) {
+        flinch *= Math.exp(-dt * 7);
+        const a = flinch * flinch * 0.05;
+        camera.rotateX(Math.sin(flinch * 37) * a);
+        camera.rotateZ(Math.sin(flinch * 23) * a * 0.6);
+      }
       return;
     }
     // Shared front cam (non-seated spectators): breathing bob — a gentle

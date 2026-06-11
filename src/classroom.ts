@@ -596,7 +596,9 @@ function pillPath(c: CanvasRenderingContext2D, x: number, y: number, w: number, 
 }
 
 // ---- tomato splat shape (a unit splatter, scaled to a half-width/height box) ----
-interface SplatBlobs {
+// Exported: the speller's first-person face splat (bee.ts) reuses the same
+// artwork on a DOM canvas so both splats look identical.
+export interface SplatBlobs {
   main: { x: number; y: number; rx: number; ry: number; rot: number }[];
   drips: { x: number; len: number; r: number }[];
   seeds: { x: number; y: number; r: number }[];
@@ -606,7 +608,7 @@ const easeOutBack = (p: number) => { const c1 = 1.70158, c3 = c1 + 1; return 1 +
 // Geometry is normalized so the shape's max reach is ~1.25 of half-W/H (lobes)
 // and drips stay within ~1.3 of half-H below — the overlay uses those bounds to
 // keep the whole splat inside the board.
-function genSplatBlobs(): SplatBlobs {
+export function genSplatBlobs(): SplatBlobs {
   const main: SplatBlobs["main"] = [{ x: 0, y: 0, rx: 1.0, ry: 0.92, rot: 0 }]; // central mass covers the cells
   const lobes = 9 + Math.floor(Math.random() * 4);
   for (let i = 0; i < lobes; i++) {
@@ -621,7 +623,7 @@ function genSplatBlobs(): SplatBlobs {
   for (let i = 0; i < 7; i++) seeds.push({ x: (Math.random() * 2 - 1) * 0.6, y: (Math.random() * 2 - 1) * 0.5, r: 0.05 + Math.random() * 0.04 });
   return { main, drips, seeds };
 }
-function drawSplatShape(c: CanvasRenderingContext2D, halfW: number, halfH: number, b: SplatBlobs) {
+export function drawSplatShape(c: CanvasRenderingContext2D, halfW: number, halfH: number, b: SplatBlobs) {
   c.fillStyle = "#b3231a"; // drips behind, dripping downward
   for (const d of b.drips) {
     const x = d.x * halfW;
