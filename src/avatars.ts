@@ -529,16 +529,21 @@ export class AvatarManager {
   private applyHeadLook(a: Avatar, dt: number): void {
     const hb = a.headBone;
     if (!hb) return;
+    // Full-body emotes (wave, duck, punch …) already swing the head/spine hard —
+    // a gaze offset stacked on top reads as deformity, so ease it out for the
+    // emote's duration and resume the networked gaze after.
+    const tYaw = a.emote ? 0 : a.lookYaw;
+    const tPitch = a.emote ? 0 : a.lookPitch;
     // Most avatars most of the time have no gaze offset — skip all the work.
-    if (a.lookYaw === 0 && a.lookPitch === 0 &&
+    if (tYaw === 0 && tPitch === 0 &&
         Math.abs(a.lookYawCur) < 0.001 && Math.abs(a.lookPitchCur) < 0.001) {
       a.lookYawCur = 0;
       a.lookPitchCur = 0;
       return;
     }
     const k = Math.min(1, dt * 10);
-    a.lookYawCur += (a.lookYaw - a.lookYawCur) * k;
-    a.lookPitchCur += (a.lookPitch - a.lookPitchCur) * k;
+    a.lookYawCur += (tYaw - a.lookYawCur) * k;
+    a.lookPitchCur += (tPitch - a.lookPitchCur) * k;
     // Clips that animate the head rewrite the bone every frame, so the offset
     // can't accumulate; otherwise restore the captured rest pose first.
     if (!a.mixerWritesHead && a.headRest) hb.quaternion.copy(a.headRest);
