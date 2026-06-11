@@ -381,6 +381,17 @@
         height: 4px; background: #ff8a8a; border-radius: 2px;
         box-shadow: 0 1px 3px rgba(0,0,0,0.4);
       }
+      /* Live WPM / accuracy chalk strip floating above the speller HUD (the
+         stats board is behind you in first person). */
+      #sh-stats {
+        position: absolute; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%);
+        white-space: nowrap; pointer-events: none;
+        color: rgba(244,241,232,0.85);
+        font: 600 17px "ABC Stefan Simple", system-ui, sans-serif;
+        letter-spacing: 0.04em; text-shadow: 0 2px 5px rgba(0,0,0,0.55);
+      }
+      #sh-stats b { color: var(--bee, #ffd23b); font-weight: 700; }
+
       /* The correct word, center-screen in white chalk (wrong answers only). */
       #correct-word {
         position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%);
@@ -660,6 +671,7 @@
          round buttons floating above the keyboard (left + right). -->
     <!-- Speller HUD: word slots + timer + replay/confirm (desk-POV near-field). -->
     <div id="spell-hud">
+      <div id="sh-stats"></div>
       <button id="sh-replay" title="Replay the word">↺ Replay</button>
       <div id="sh-slots"></div>
       <button id="sh-check" title="Confirm your word (Enter)">✔</button>

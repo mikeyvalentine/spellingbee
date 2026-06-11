@@ -189,8 +189,15 @@ export function setupBee(opts: BeeOpts): BeeStage {
   const shReplay = document.getElementById("sh-replay")!;
   const shCheck = document.getElementById("sh-check")!;
   const correctWord = document.getElementById("correct-word")!;
+  const shStats = document.getElementById("sh-stats")!;
   shReplay.addEventListener("click", () => { if (lastBuffer) playBuffer(lastBuffer); });
   shCheck.addEventListener("click", () => submit());
+
+  // Live WPM/accuracy above the HUD — the stats board is behind you in first
+  // person. Fed by the server's bee_key echoes (same numbers the board shows).
+  const setShStats = (wpm: number, acc: number) => {
+    shStats.innerHTML = `<b>${Math.round(wpm)}</b> WPM&ensp;·&ensp;<b>${Math.round(acc)}%</b> ACC`;
+  };
 
   // Result state mirrored from the board: green when right, red + struck when
   // wrong (with the correct word center-screen). Lives until the next turn.
@@ -843,6 +850,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
         seatPlayers();
         // Secondary board: current speller's name + (cumulative) accuracy, WPM resets.
         classroom.setStats(getName(m.spellerId), 0, m.accuracy ?? 100, m.spellerId === localId);
+        if (amSpeller) setShStats(0, m.accuracy ?? 100); // fresh turn → fresh HUD stats
 
         // Stage the boards' content, then write it all in one char at a time.
         // The tier is known now, so show the round header straight away.
@@ -893,6 +901,8 @@ export function setupBee(opts: BeeOpts): BeeStage {
         if (m.spellerId !== localId) classroom.setBoardGuess(censor(m.text || ""), curLength);
         // Live WPM + accuracy on the secondary stats board (everyone sees it).
         classroom.setStats(getName(m.spellerId), m.wpm ?? 0, m.accuracy ?? 100, m.spellerId === localId);
+        // …and mirrored above the speller's HUD (the stats board is behind them).
+        if (m.spellerId === localId) setShStats(m.wpm ?? 0, m.accuracy ?? 100);
         break;
 
       case "bee_turn_result": {
