@@ -25,9 +25,9 @@ let apiKey = ENV.GOOGLE_TTS_API_KEY || "";
 let elevenKey = ENV.ELEVENLABS_API_KEY || "";
 let elevenVoiceId = ENV.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM"; // "Rachel" — clear default
 let elevenModel = ENV.ELEVENLABS_MODEL || "eleven_multilingual_v2"; // or eleven_flash_v2_5 (faster/cheaper)
-// Playback speed (0.7 slowest … 1.2 fastest; 1.0 = normal). Default a bit slow so
-// spellers can hear every syllable. Tunable via ELEVENLABS_SPEED.
-let elevenSpeed = ENV.ELEVENLABS_SPEED != null && ENV.ELEVENLABS_SPEED !== "" ? Number(ENV.ELEVENLABS_SPEED) : 0.8;
+// Playback speed (0.7 slowest … 1.2 fastest; 1.0 = normal). Pinned at the API's
+// floor — spellers want every syllable. Tunable via ELEVENLABS_SPEED.
+let elevenSpeed = ENV.ELEVENLABS_SPEED != null && ENV.ELEVENLABS_SPEED !== "" ? Number(ENV.ELEVENLABS_SPEED) : 0.7;
 // Up to 3 "<id>:<version>" pronunciation-dictionary locators to hard-fix words the
 // model mangles (comma-separated; version optional). e.g. "abc123,def456:7".
 let elevenPronos = ENV.ELEVENLABS_PRONO_DICTS || "";
