@@ -47,7 +47,8 @@
       }
       .lobby-logo { font-size: 30px; line-height: 1; }
       .lobby-logo img { width: 1.6em; height: 1.6em; display: block; margin: 0 auto; }
-      #menu-btn img { width: 28px; height: 28px; display: block; }
+      /* The icon fills the whole button; radius tucks inside the 10px border. */
+      #menu-btn img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 9px; }
       .lobby-title {
         font-family: "ABC Stefan Simple", system-ui, sans-serif;
         font-size: 28px; font-weight: 600; letter-spacing: 0.5px; margin: 2px 0 12px;

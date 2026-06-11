@@ -652,6 +652,11 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
         case "bee_removebot":
           removeBot();
           break;
+        case "bee_endmatch":
+          // Host aborts the match early — everyone goes straight back to the
+          // lobby (no game-over screen, no winner).
+          if (phase === "match" && id === hostId) returnToLobby();
+          break;
         case "bee_claimhost":
           // Any player in the lobby can take over as host.
           if (phase === "lobby" && queue.includes(id)) {

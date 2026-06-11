@@ -392,12 +392,16 @@ export function setupBee(opts: BeeOpts): BeeStage {
       if (!amSpectator && aliveIds.includes(localId)) {
         out.push(`<button class="menu-item" id="mi-spectate">👀 Spectate</button>`);
       }
+      if (localId === hostId) {
+        out.push(`<button class="menu-item danger" id="mi-endmatch">🛑 End match</button>`);
+      }
       out.push(`<button class="menu-item danger" id="mi-leave">🚪 Leave match</button>`);
       out.push(`<div class="menu-sep"></div>`);
     }
     out.push(`<button class="menu-item" id="mi-settings">⚙ Settings</button>`);
     menuItems.innerHTML = out.join("");
     document.getElementById("mi-spectate")?.addEventListener("click", () => { becomeSpectator(); closeMenu(); });
+    document.getElementById("mi-endmatch")?.addEventListener("click", () => { net.sendBee({ type: "bee_endmatch" }); closeMenu(); });
     document.getElementById("mi-leave")?.addEventListener("click", () => { leaveMatch(); closeMenu(); });
     document.getElementById("mi-settings")?.addEventListener("click", () => { openSettings(); closeMenu(); });
   };
