@@ -422,11 +422,13 @@
         border: 1px solid rgba(244,241,232,0.16); border-bottom: 0;
         border-radius: 12px 12px 0 0; padding: 10px 22px 14px;
         font: 700 15px system-ui, sans-serif; box-shadow: 0 -6px 24px rgba(0,0,0,0.45);
-        transition: transform 0.16s ease; white-space: nowrap;
+        transition: padding 0.16s ease; white-space: nowrap;
       }
       #clip-peek.show { display: block; }
-      /* Unified hover: hovering the strip OR the 3D clipboard raises both (lobby.ts toggles .hot). */
-      #clip-peek.hot { transform: translateX(-50%) translateY(-6px); }
+      /* Unified hover: hovering the strip OR the 3D clipboard raises both
+         (lobby.ts toggles .hot). The pill GROWS upward from the screen edge —
+         translating it up would expose a gap beneath it. */
+      #clip-peek.hot { padding-top: 16px; padding-bottom: 20px; }
       #clip-peek #clip-peek-text { font: 700 19px "ABC Stefan Simple", system-ui, sans-serif; letter-spacing: 0.3px; }
       #clip-peek .cp-peek-hint { color: var(--muted); font-weight: 500; font-size: 12px; margin-left: 10px; }
 
@@ -729,7 +731,7 @@
     </div>
 
     <!-- Top-right universal menu (always visible) -->
-    <button id="menu-btn" title="Menu" aria-label="Menu"><img src="/assets/bee.svg" alt="" /></button>
+    <button id="menu-btn" title="Menu" aria-label="Menu"><img src="/assets/yellowbee.png" alt="" /></button>
     <div id="menu-panel"><div id="menu-items"></div></div>
 
     <!-- Settings modal: audio volumes -->
