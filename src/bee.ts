@@ -941,8 +941,8 @@ export function setupBee(opts: BeeOpts): BeeStage {
   // Free-look range: cursor at the screen edge (or a full-width drag) = full
   // sweep. Wide enough to glance "over your shoulder" without spinning the room.
   // Down gets a bit more travel than up.
-  const LOOK_YAW = 0.84; // radians (~48°) each way
-  const LOOK_PITCH_UP = 0.15, LOOK_PITCH_DOWN = 0.21;
+  const LOOK_YAW = 0.63; // radians (~36°) each way
+  const LOOK_PITCH_UP = 0.11, LOOK_PITCH_DOWN = 0.16;
   let lookTX = 0, lookTY = 0; // free-look target, -1..1 (touch drags write here)
   let lookX = 0, lookY = 0; // eased
   let lookGain = 1; // eases to 0 while the clipboard is up, so it reads calmly
