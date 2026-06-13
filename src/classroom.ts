@@ -28,6 +28,8 @@ const BOARD_H = 2.0;
 // Secondary (stats) board base plane — portrait, matching its 512×680 canvas.
 const STATS_W = 2.4;
 const STATS_H = 3.2;
+const PLIST_W = 2.0; // turn-queue board plane (portrait); scaled to fit its wall object
+const PLIST_H = 3.4;
 
 export interface CameraPose {
   pos: THREE.Vector3;
@@ -69,6 +71,10 @@ export interface Classroom {
    *  `mine` = the name is the viewing client's own player (gets the yellow pill). */
   setStats(name: string, wpm: number, accuracy: number, mine: boolean): void;
   clearStats(): void;
+  /** The wall player-list (turn queue): a vertical, animated list of upcoming
+   *  players, next-up at top. Diffed against the current list — removed names
+   *  erase, survivors slide, new names write in. Pass [] to clear. */
+  setPlayerList(items: { key: string; label: string }[]): void;
   /** Write both boards' current content in, one char at a time (turn start). */
   revealBoards(): void;
   /** Erase both boards, one char at a time (during the result pause). */
@@ -102,6 +108,7 @@ const norm = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 export async function loadClassroom(scene: THREE.Scene): Promise<Classroom> {
   const board = makeChalkboard();
   const stats = makeStatsBoard();
+  const plist = makePlayerList();
   let layout: ClassroomLayout;
   try {
     // The room is Draco-compressed (its dense scan geometry compresses ~4x
@@ -113,7 +120,7 @@ export async function loadClassroom(scene: THREE.Scene): Promise<Classroom> {
       .setDRACOLoader(draco)
       .loadAsync(GLB_URL);
     draco.dispose(); // decoder workers are no longer needed once the room is in
-    layout = buildFromGlb(gltf.scene, board, stats);
+    layout = buildFromGlb(gltf.scene, board, stats, plist);
   } catch (e) {
     console.warn("classroom.glb not loaded, using procedural fallback:", e);
     layout = buildProcedural(board);
@@ -140,6 +147,7 @@ export async function loadClassroom(scene: THREE.Scene): Promise<Classroom> {
     setBoardHeader: board.setHeader,
     setStats: stats.setStats,
     clearStats: stats.clear,
+    setPlayerList: plist.setItems,
     revealBoards: () => {
       // Only the word cells write in; the header + stats board appear instantly.
       board.writeIn();
@@ -186,7 +194,7 @@ interface ClassroomLayout {
 // ---------------------------------------------------------------------------
 // GLB classroom.
 // ---------------------------------------------------------------------------
-function buildFromGlb(root: THREE.Object3D, board: Chalkboard, stats: StatsBoard): ClassroomLayout {
+function buildFromGlb(root: THREE.Object3D, board: Chalkboard, stats: StatsBoard, plist: PlayerList): ClassroomLayout {
   root.updateMatrixWorld(true);
 
   const cams = new Map<string, THREE.PerspectiveCamera>();
@@ -307,6 +315,8 @@ function buildFromGlb(root: THREE.Object3D, board: Chalkboard, stats: StatsBoard
   const mainCx = mountBoard(root, objs.get("frontwall"), board);
   // Stats plane on the secondary (tall, narrow) board off to the side.
   mountStatsBoard(root, stats, mainCx);
+  // Turn-queue list on the "playerlist" board (a side wall), facing the room.
+  mountPlayerList(root, objs.get("playerlist"), plist, seats);
 
   return { root, lobbyCam, matchCam, seats, seatCams: seatPoses, hostSpot, spellerPos, lights };
 }
@@ -502,6 +512,143 @@ function mountStatsBoard(root: THREE.Object3D, stats: StatsBoard, mainCx: number
   stats.mesh.position.set(side.c.x, side.c.y, side.minZ - 0.02);
   stats.mesh.rotation.y = Math.PI;
   root.add(stats.mesh);
+}
+
+// ---------------------------------------------------------------------------
+// Player-list board: the turn queue on the "playerlist" wall object. A vertical
+// list of upcoming players (next-up at top), animated by diffing successive
+// lists — removed names erase char-by-char, survivors slide to their new row,
+// new names write in. Names live on a transparent canvas overlaid on the prop.
+// ---------------------------------------------------------------------------
+interface PlayerList {
+  mesh: THREE.Mesh;
+  setItems(items: { key: string; label: string }[]): void;
+}
+
+interface PLEntry { key: string; text: string; y: number; ty: number; rev: number; trev: number; }
+
+function makePlayerList(): PlayerList {
+  const W = 460, H = 800;
+  const canvas = document.createElement("canvas");
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d")!;
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(PLIST_W, PLIST_H),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true })
+  );
+  mesh.name = "PlayerListText";
+
+  const MAX = 8; // visible rows (incl. an overflow "+N more" line)
+  const HEAD_Y = 66, DIV_Y = 104, ROW0 = 188, ROW_H = 74;
+  const rowCenter = (i: number) => ROW0 + i * ROW_H;
+  const MORE = "__more__";
+
+  let entries: PLEntry[] = [];
+  let raf = 0, lastT = 0;
+
+  const draw = () => {
+    ctx.clearRect(0, 0, W, H);
+    ctx.textBaseline = "middle";
+    // Header.
+    ctx.textAlign = "center";
+    ctx.font = `700 44px ${FONT}`;
+    ctx.fillStyle = "rgba(244,241,232,0.6)";
+    ctx.fillText("UP NEXT", W / 2, HEAD_Y);
+    ctx.strokeStyle = "rgba(244,241,232,0.22)";
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(38, DIV_Y); ctx.lineTo(W - 38, DIV_Y); ctx.stroke();
+    // Rows.
+    ctx.textAlign = "left";
+    for (const e of entries) {
+      const shown = e.text.slice(0, Math.max(0, Math.round(e.rev * e.text.length)));
+      const more = e.key === MORE;
+      ctx.font = `${more ? "600" : "700"} ${more ? 34 : 50}px ${FONT}`;
+      ctx.fillStyle = more ? "rgba(244,241,232,0.5)" : "#f4f1e8";
+      ctx.shadowColor = "rgba(0,0,0,0.4)"; ctx.shadowBlur = 4;
+      ctx.fillText(shown, 46, e.y);
+    }
+    ctx.shadowBlur = 0;
+    tex.needsUpdate = true;
+  };
+
+  const tick = (now: number) => {
+    const dt = Math.min(0.05, lastT ? (now - lastT) / 1000 : 0.016);
+    lastT = now;
+    let busy = false;
+    for (const e of entries) {
+      if (e.rev !== e.trev) {
+        const dur = (e.trev > e.rev ? 0.05 : 0.03) * Math.max(1, e.text.length); // write slower than erase
+        const step = dt / dur;
+        e.rev = e.trev > e.rev ? Math.min(e.trev, e.rev + step) : Math.max(e.trev, e.rev - step);
+        busy = true;
+      }
+      if (Math.abs(e.ty - e.y) > 0.5) { e.y += (e.ty - e.y) * Math.min(1, dt * 9); busy = true; }
+    }
+    entries = entries.filter((e) => !(e.trev === 0 && e.rev <= 0.001)); // drop fully-erased
+    draw();
+    raf = busy ? requestAnimationFrame(tick) : 0;
+    if (!busy) lastT = 0;
+  };
+  const kick = () => { if (!raf) raf = requestAnimationFrame(tick); };
+
+  const setItems = (items: { key: string; label: string }[]) => {
+    let list = items;
+    if (list.length > MAX) {
+      list = list.slice(0, MAX - 1);
+      list.push({ key: MORE, label: `+${items.length - (MAX - 1)} more` });
+    }
+    const keep = new Set(list.map((it) => it.key));
+    const byKey = new Map(entries.map((e) => [e.key, e]));
+    list.forEach((it, i) => {
+      const e = byKey.get(it.key);
+      if (e) { e.text = it.label; e.ty = rowCenter(i); e.trev = 1; }
+      else {
+        const fresh: PLEntry = { key: it.key, text: it.label, y: rowCenter(i), ty: rowCenter(i), rev: 0, trev: 1 };
+        entries.push(fresh); byKey.set(it.key, fresh);
+      }
+    });
+    for (const e of entries) if (!keep.has(e.key)) e.trev = 0; // erase the departed in place
+    kick();
+  };
+
+  if (document.fonts) document.fonts.ready.then(() => draw()).catch(() => {});
+  draw();
+  return { mesh, setItems };
+}
+
+// Mount the player-list plane onto a wall object, facing the room. Orientation
+// is derived from the object's bounds (thinnest horizontal axis = wall normal)
+// so it works regardless of which wall the artist placed it on.
+function mountPlayerList(root: THREE.Object3D, obj: THREE.Object3D | undefined, plist: PlayerList, seats: Seat[]) {
+  if (!obj) { plist.mesh.visible = false; return; }
+  const box = new THREE.Box3().setFromObject(obj);
+  if (box.isEmpty()) { plist.mesh.visible = false; return; }
+  const c = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const rc = new THREE.Vector3();
+  if (seats.length) { for (const s of seats) rc.add(s.pos); rc.divideScalar(seats.length); }
+  else rc.set(0, c.y, 5);
+
+  let faceW: number;
+  if (size.x < size.z) {
+    // Panel on a ±X wall — its normal is X; face toward the room interior.
+    const inward = Math.sign(rc.x - c.x) || -1;
+    plist.mesh.rotation.y = inward < 0 ? -Math.PI / 2 : Math.PI / 2;
+    c.x += inward * (size.x / 2 + 0.02);
+    faceW = size.z;
+  } else {
+    const inward = Math.sign(rc.z - c.z) || -1;
+    plist.mesh.rotation.y = inward < 0 ? Math.PI : 0;
+    c.z += inward * (size.z / 2 + 0.02);
+    faceW = size.x;
+  }
+  plist.mesh.scale.set((faceW * 0.92) / PLIST_W, (size.y * 0.9) / PLIST_H, 1);
+  plist.mesh.position.copy(c);
+  plist.mesh.renderOrder = 5;
+  root.add(plist.mesh);
 }
 
 // ---------------------------------------------------------------------------

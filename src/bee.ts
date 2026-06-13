@@ -615,6 +615,25 @@ export function setupBee(opts: BeeOpts): BeeStage {
     });
   };
 
+  // The wall turn-queue board. In a match: upcoming players, next-up at top,
+  // current speller excluded (they're on the chalkboard), eliminated dropped.
+  // In the lobby: the join roster in order. The board diffs + animates itself.
+  const refreshPlayerList = () => {
+    const items: { key: string; label: string }[] = [];
+    if (phase === "match") {
+      const aliveSet = new Set(aliveIds);
+      const start = activeSpeller ? seatOrder.indexOf(activeSpeller) : -1;
+      for (let k = 1; k <= seatOrder.length; k++) {
+        const id = seatOrder[((start < 0 ? -1 : start) + k + seatOrder.length) % seatOrder.length];
+        if (!id || id === activeSpeller || !aliveSet.has(id)) continue;
+        items.push({ key: id, label: getName(id) });
+      }
+    } else {
+      for (const id of seatOrder) items.push({ key: id, label: getName(id) });
+    }
+    classroom.setPlayerList(items);
+  };
+
   const enterLobby = (queue: string[]) => {
     phase = "lobby";
     matchOver = false;
@@ -637,6 +656,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
     updateMatchHud();
     updateTomatoBtn();
     seatPlayers();
+    refreshPlayerList(); // wall board shows the lobby roster
   };
 
   const enterMatch = (order: string[]) => {
@@ -661,6 +681,9 @@ export function setupBee(opts: BeeOpts): BeeStage {
     updateMatchHud(); // desktop: hidden · touch: slim bottom bar
     updateTomatoBtn();
     seatPlayers();
+    // Show the full (shuffled) turn order; the first bee_turn then erases the
+    // speller off the top and slides the rest up.
+    classroom.setPlayerList(seatOrder.map((id) => ({ key: id, label: getName(id) })));
   };
 
   // ---------- input ----------
@@ -868,6 +891,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
         // Secondary board: current speller's name + (cumulative) accuracy, WPM resets.
         classroom.setStats(getName(m.spellerId), 0, m.accuracy ?? 100, m.spellerId === localId);
         if (amSpeller) setShStats(0, m.accuracy ?? 100); // fresh turn → fresh HUD stats
+        refreshPlayerList(); // wall queue: erase the new speller off the top, slide up
 
         // Stage the boards' content, then write it all in one char at a time.
         // The tier is known now, so show the round header straight away.
@@ -991,6 +1015,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
         aliveIds = [];
         hudResult = null; // the game-over screen replaces any per-turn result
         clearFaceSplat();
+        classroom.setPlayerList([]); // clear the wall queue at game over
         // Showcase the winner: pull THEM to the front-stage spot (under the lamp
         // spotlight, replacing whoever was last up) and loop a celebratory wave.
         // seatPlayers() returns everyone else to their chairs.
