@@ -233,6 +233,30 @@
       .set-row input[type="range"] { width: 100%; accent-color: var(--bee); cursor: pointer; }
       .set-row span { text-align: right; color: var(--bee); font-variant-numeric: tabular-nums; font-size: 13px; }
 
+      /* ---------- Emote bar (desk emotes, bottom-left) ---------- */
+      #emote-bar {
+        position: fixed; left: 22px; bottom: 22px; z-index: 17; display: none;
+        gap: 7px; padding: 7px; border-radius: 14px;
+        background: rgba(14,17,24,0.5); border: 1px solid rgba(255,255,255,0.12);
+        box-shadow: 0 6px 22px rgba(0,0,0,0.45); backdrop-filter: blur(2px);
+      }
+      #emote-bar.show { display: flex; }
+      .emote-btn {
+        width: 50px; height: 50px; border: 0; border-radius: 11px; padding: 0;
+        background: rgba(255,255,255,0.05); cursor: pointer; font-size: 26px;
+        display: grid; place-items: center; -webkit-tap-highlight-color: transparent;
+        transition: transform 0.1s ease, background 0.12s ease;
+      }
+      .emote-btn:hover { transform: scale(1.12); background: rgba(255,255,255,0.12); }
+      .emote-btn:active { transform: scale(0.92); }
+      .emote-btn.cooldown { opacity: 0.45; pointer-events: none; }
+      @media (max-height: 480px) { .emote-btn { width: 42px; height: 42px; font-size: 22px; } }
+      /* Touch: the item tray moves top-left; keep emotes bottom-left but lift them
+         clear of the spectator pill / safe area. */
+      @media (pointer: coarse) {
+        #emote-bar { left: max(8px, env(safe-area-inset-left)); bottom: max(14px, env(safe-area-inset-bottom)); }
+      }
+
       /* ---------- Power-up item menu (2D, bottom-right) ---------- */
       #item-menu {
         position: fixed; right: 22px; bottom: 22px; z-index: 17; display: none;
@@ -747,6 +771,7 @@
     </div>
 
     <!-- Power-up item menu (bottom-right). Hand-drawn icons. -->
+    <div id="emote-bar" aria-label="Emotes"></div>
     <div id="item-menu" aria-hidden="true">
       <button class="item-btn" id="item-chalk" title="Golden chalk: reveal a letter">
         <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">

@@ -820,6 +820,45 @@ export function setupBee(opts: BeeOpts): BeeStage {
     if (lastBuffer) playBuffer(lastBuffer);
   });
 
+  // ---------- desk emote bar ----------
+  // A row of emote buttons for players at their desks (lobby, and in a match
+  // when seated + not the active speller). Only emotes the local model actually
+  // has are shown; the chosen one is relayed so everyone sees the avatar play it.
+  const emoteBar = document.getElementById("emote-bar")!;
+  const EMOTES: { key: string; emoji: string; title: string }[] = [
+    { key: "wave", emoji: "👋", title: "Wave" },
+    { key: "yes", emoji: "👍", title: "Nod yes" },
+    { key: "no", emoji: "👎", title: "Shake no" },
+    { key: "punch", emoji: "👊", title: "Punch" },
+    { key: "duck", emoji: "🙇", title: "Duck" },
+  ];
+  let lastEmoteAt = 0;
+  const sendEmote = (key: string, btn: HTMLButtonElement) => {
+    const now = performance.now();
+    if (now - lastEmoteAt < 450 || !avatars.hasEmote(localId, key)) return;
+    lastEmoteAt = now;
+    net.sendBee({ type: "bee_emote", emote: key });
+    btn.classList.add("cooldown");
+    window.setTimeout(() => btn.classList.remove("cooldown"), 450);
+  };
+  const emoteBtns = EMOTES.map(({ key, emoji, title }) => {
+    const b = document.createElement("button");
+    b.className = "emote-btn"; b.textContent = emoji; b.title = title; b.dataset.key = key;
+    b.addEventListener("click", (e) => { e.stopPropagation(); sendEmote(key, b); });
+    emoteBar.appendChild(b);
+    return b;
+  });
+  const canEmote = () => {
+    if (uiFocused()) return false; // clipboard up — keep it clear
+    if (phase === "lobby") return true;
+    return phase === "match" && !matchOver && !amSpeller && myMatchSeat >= 0; // seated, not on stage
+  };
+  const updateEmoteBar = () => {
+    const show = canEmote();
+    emoteBar.classList.toggle("show", show);
+    if (show) for (const b of emoteBtns) b.style.display = avatars.hasEmote(localId, b.dataset.key!) ? "" : "none";
+  };
+
   // ---------- network ----------
   const handle = (m: any) => {
     switch (m.type) {
@@ -837,6 +876,11 @@ export function setupBee(opts: BeeOpts): BeeStage {
       case "bee_look":
         // Another player's gaze — turn their avatar's head toward it.
         if (m.id !== localId) avatars.setLook(m.id, m.yaw ?? 0, m.pitch ?? 0);
+        break;
+
+      case "bee_emote":
+        // Another player's desk emote — play it on their avatar (one-shot).
+        if (m.id !== localId) avatars.playEmote(m.id, m.emote, false, 1);
         break;
 
       case "bee_splat": {
@@ -1218,6 +1262,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
       applyCamera(basePose()); // per-player POV (host = front, others = their seat)
       applyCameraLife(dt); // lobby free-look · match bob + parallax
       sendLook(); // throttled gaze sync — other clients turn this player's head
+      updateEmoteBar(); // show/hide the desk emote bar for the current state
       tomato.update(dt); // advance any in-flight thrown tomatoes
 
       // Seats + speller are placed once by seatPlayers() on each state change; only

@@ -159,6 +159,8 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
   const bots = new Set(); // dev-only AI players
   const isBot = (id) => bots.has(id);
   const BOT_NAMES = ["Ada", "Bo", "Cy", "Dot", "Eve", "Fox", "Gus", "Ivy", "Jax", "Kit"];
+  const EMOTES = new Set(["wave", "yes", "no", "punch", "duck"]); // desk-emote allow-list
+  const emoteAt = new Map(); // id -> last emote ms (rate limit)
 
   let order = []; // turn order = queue snapshot at start
   let mode = "basic"; // selected gamemode (only "basic" is implemented for now)
@@ -678,6 +680,16 @@ export function createBee(broadcast, sendTo, getPlayerIds, opts = {}) {
           const yaw = Math.max(-1.6, Math.min(1.6, Number(m.yaw) || 0));
           const pitch = Math.max(-0.9, Math.min(0.9, Number(m.pitch) || 0));
           broadcast({ type: "bee_look", id, yaw, pitch });
+          break;
+        }
+        case "bee_emote": {
+          // Desk emote: relay a player-triggered one-shot animation to everyone
+          // (sender ignores its own echo). Allow-list + light rate limit.
+          if (!EMOTES.has(m.emote)) break;
+          const now = Date.now();
+          if (now - (emoteAt.get(id) || 0) < 350) break;
+          emoteAt.set(id, now);
+          broadcast({ type: "bee_emote", id, emote: m.emote });
           break;
         }
         case "bee_answer":

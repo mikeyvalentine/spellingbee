@@ -201,6 +201,12 @@ export class AvatarManager {
     return (i != null && this.modelOffsets[i]) || ZERO_OFFSET;
   }
 
+  /** Whether the model assigned to `id` has a given emote/animation clip. */
+  hasEmote(id: string, state: string): boolean {
+    const i = this.assigned.get(id);
+    return i != null && !!this.models[i]?.clips?.[state as AnimState];
+  }
+
   setLayout(spawn: THREE.Vector3, ringRadius: number): void {
     this.spawn.copy(spawn);
     this.ringRadius = ringRadius;
