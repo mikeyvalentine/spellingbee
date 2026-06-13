@@ -158,10 +158,16 @@ export function setupBee(opts: BeeOpts): BeeStage {
   } as any);
   document.body.appendChild(specBottom);
 
-  // Toggle both spectator indicators together.
-  const setSpec = (on: boolean) => {
-    specBanner.style.display = on ? "block" : "none";
-    specBottom.style.display = on ? "block" : "none";
+  // Refresh the spectator indicators from current state. The banner is for
+  // explicit spectators (chose to / forced); the bottom pill also shows for
+  // ELIMINATED players, who keep watching from their own (locked) desk. Derives
+  // everything, so callers don't pass a flag — `setSpec()` just re-evaluates.
+  const setSpec = (_on?: boolean) => {
+    const out = phase === "match" && !matchOver && !amSpectator &&
+      myMatchSeat >= 0 && aliveIds.length > 0 && !aliveIds.includes(localId);
+    specBanner.style.display = amSpectator ? "block" : "none";
+    specBottom.textContent = amSpectator ? "👀 Spectating" : "❌ Out — watching from your seat";
+    specBottom.style.display = amSpectator || out ? "block" : "none";
   };
 
   // Replay button pinned to the chalkboard's bottom-LEFT corner.
@@ -613,6 +619,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
       placeSeated(av, si, id);
       av.visible = true;
     });
+    setSpec(); // reflect alive/seat/spectator state (incl. "out — at your desk")
   };
 
   // The wall turn-queue board. In a match: upcoming players, next-up at top,
@@ -668,6 +675,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
     clearFaceSplat();
     audio.setMusicEnabled(false); // silence the lobby song during the match
     seatOrder = order.length ? order : seatOrder;
+    aliveIds = [...seatOrder]; // everyone starts alive (seats locked to this order)
     amSpectator = order.length > 0 && !order.includes(localId);
     setSpec(amSpectator);
     activeSpeller = null;
@@ -963,6 +971,7 @@ export function setupBee(opts: BeeOpts): BeeStage {
         updateMatchHud();
         if (isTouch) input.blur();
         aliveIds = m.alive ?? aliveIds;
+        setSpec(); // if that result eliminated me, show "out — at your desk" now
         classroom.clearSplat(); // turn over — clear the splat
         updateTomatoBtn();
         classroom.setBoardResult(censor(m.guess || ""), m.correct, m.word);
@@ -1092,7 +1101,11 @@ export function setupBee(opts: BeeOpts): BeeStage {
   // so they look around freely with a much wider, unlocked range.
   const LOOK_YAW = 0.5, LOOK_PITCH_UP = 0.088, LOOK_PITCH_DOWN = 0.128; // locked
   const SPEC_LOOK_YAW = 1.5, SPEC_PITCH_UP = 0.5, SPEC_PITCH_DOWN = 0.6; // spectators
-  const spectating = () => phase === "match" && (amSpectator || myMatchSeat < 0);
+  // Actively playing = a seated player this match who is still alive and hasn't
+  // opted out. Everyone else in a match is spectating (eliminated players watch
+  // from their own desk — their seat is locked at match start and never changes).
+  const amPlaying = () => phase === "match" && !amSpectator && myMatchSeat >= 0 && aliveIds.includes(localId);
+  const spectating = () => phase === "match" && !amPlaying();
   const lookRange = () =>
     spectating()
       ? { yaw: SPEC_LOOK_YAW, up: SPEC_PITCH_UP, down: SPEC_PITCH_DOWN }
