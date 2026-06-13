@@ -27,6 +27,7 @@ const CHARACTER_URLS = [
   "/characters/Monkroose.glb",
   "/characters/Yeti.glb",
   "/characters/Zombie2.glb",
+  "/characters/Enemy Large.glb",
 ];
 
 // Discord loads the Activity in an iframe with a `frame_id` query param. Inlined

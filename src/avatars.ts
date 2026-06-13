@@ -13,7 +13,9 @@ const TARGET_HEIGHT = 1.7; // normalize every model to ~human height
 // computed from the bounding box. Keyed by model name (filename without .glb).
 // Tune live with the debug "Model seat offset" sliders, then bake values here.
 const MODEL_OFFSETS: Record<string, [number, number, number]> = {
-  // e.g. "Yeti": [0, 0.12, -0.1],
+  Demon: [-0.34, 0, 0],
+  Zombie: [-0.25, 0, 0],
+  Monkroose: [-1, -0.26, 0],
 };
 const modelNameFromUrl = (url: string) =>
   decodeURIComponent(url.split("/").pop() || "").replace(/\.glb$/i, "");
