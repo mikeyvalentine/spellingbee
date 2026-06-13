@@ -1060,17 +1060,18 @@ export function setupBee(opts: BeeOpts): BeeStage {
   // follows a one-finger drag (touch). Match: idle "breathing" bob + a subtle
   // cursor parallax (unchanged this pass).
   let targetMx = 0, targetMy = 0; // cursor in NDC [-1,1]
-  let curMx = 0, curMy = 0; // eased toward the target
-  let bobT = 0;
   let turnTilt = 0; // 0..1 eased; on the local speller's touch turn, tilt down for the keyboard
-  const MAX_YAW = 0.045, MAX_PITCH = 0.03; // match cursor-look amounts (radians)
-  const BOB_Y = 0.014, BOB_X = 0.008; // breathing translation (world units)
   const TURN_TILT = 0.16; // downward pitch on the speller's touch turn (radians)
-  // Free-look range: cursor at the screen edge (or a full-width drag) = full
-  // sweep. Wide enough to glance "over your shoulder" without spinning the room.
-  // Down gets a bit more travel than up.
-  const LOOK_YAW = 0.5; // radians (~29°) each way
-  const LOOK_PITCH_UP = 0.088, LOOK_PITCH_DOWN = 0.128;
+  // Free-look range. Seated players + the lobby get a tight "lock" so they keep
+  // facing the board; spectators (not a seated player this match) aren't playing,
+  // so they look around freely with a much wider, unlocked range.
+  const LOOK_YAW = 0.5, LOOK_PITCH_UP = 0.088, LOOK_PITCH_DOWN = 0.128; // locked
+  const SPEC_LOOK_YAW = 1.5, SPEC_PITCH_UP = 0.5, SPEC_PITCH_DOWN = 0.6; // spectators
+  const spectating = () => phase === "match" && (amSpectator || myMatchSeat < 0);
+  const lookRange = () =>
+    spectating()
+      ? { yaw: SPEC_LOOK_YAW, up: SPEC_PITCH_UP, down: SPEC_PITCH_DOWN }
+      : { yaw: LOOK_YAW, up: LOOK_PITCH_UP, down: LOOK_PITCH_DOWN };
   let lookTX = 0, lookTY = 0; // free-look target, -1..1 (touch drags write here)
   let lookX = 0, lookY = 0; // eased
   let lookGain = 1; // eases to 0 while the clipboard is up, so it reads calmly
@@ -1079,45 +1080,32 @@ export function setupBee(opts: BeeOpts): BeeStage {
     targetMy = (e.clientY / window.innerHeight) * 2 - 1;
   });
   const applyCameraLife = (dt: number) => {
-    if (!onMatchCam()) {
-      // Free-look: the lobby, and seated players waiting their turn in a match.
-      // The clipboard is camera-anchored (clipboard.ts composes its matrix from
-      // the camera's each frame, AFTER this runs), so it stays glued to the same
-      // screen spot no matter where the player looks.
-      if (!isTouch) { lookTX = targetMx; lookTY = targetMy; }
-      // Damp the free-look to 30% on your own turn (the cursor doubles as the
-      // typing/HUD pointer), and to 0 while the clipboard is up.
-      const myTurn = phase === "match" && amSpeller && !answered && !amSpectator;
-      lookGain += ((uiFocused() ? 0 : myTurn ? 0.3 : 1) - lookGain) * Math.min(1, dt * 4);
-      lookX += (lookTX - lookX) * Math.min(1, dt * 5);
-      lookY += (lookTY - lookY) * Math.min(1, dt * 5);
-      camera.rotateY(-lookX * LOOK_YAW * lookGain);
-      camera.rotateX(-lookY * (lookY > 0 ? LOOK_PITCH_DOWN : LOOK_PITCH_UP) * lookGain);
-      // Touch: on your own turn, ease the view DOWN so the stage/board clears
-      // the on-screen keyboard (the speller is in this free-look branch now).
-      const tiltTarget = isTouch && myTurn ? 1 : 0;
-      turnTilt += (tiltTarget - turnTilt) * Math.min(1, dt * 6);
-      if (turnTilt > 0.001) camera.rotateX(-turnTilt * TURN_TILT);
-      // Tomato-impact flinch: a short decaying first-person jolt (~0.3s).
-      if (flinch > 0.003) {
-        flinch *= Math.exp(-dt * 7);
-        const a = flinch * flinch * 0.05;
-        camera.rotateX(Math.sin(flinch * 37) * a);
-        camera.rotateZ(Math.sin(flinch * 23) * a * 0.6);
-      }
-      return;
+    // Everyone free-looks now (lobby, seated players, and spectators) — only the
+    // RANGE differs (lookRange: tight lock for players, wide for spectators). The
+    // clipboard is camera-anchored (clipboard.ts composes its matrix from the
+    // camera each frame, AFTER this), so it stays glued no matter where you look.
+    const r = lookRange();
+    if (!isTouch) { lookTX = targetMx; lookTY = targetMy; }
+    // Damp the free-look to 30% on your own turn (the cursor doubles as the
+    // typing/HUD pointer), and to 0 while the clipboard is up.
+    const myTurn = phase === "match" && amSpeller && !answered && !amSpectator;
+    lookGain += ((uiFocused() ? 0 : myTurn ? 0.3 : 1) - lookGain) * Math.min(1, dt * 4);
+    lookX += (lookTX - lookX) * Math.min(1, dt * 5);
+    lookY += (lookTY - lookY) * Math.min(1, dt * 5);
+    camera.rotateY(-lookX * r.yaw * lookGain);
+    camera.rotateX(-lookY * (lookY > 0 ? r.down : r.up) * lookGain);
+    // Touch: on your own turn, ease the view DOWN so the stage/board clears the
+    // on-screen keyboard.
+    const tiltTarget = isTouch && myTurn ? 1 : 0;
+    turnTilt += (tiltTarget - turnTilt) * Math.min(1, dt * 6);
+    if (turnTilt > 0.001) camera.rotateX(-turnTilt * TURN_TILT);
+    // Tomato-impact flinch: a short decaying first-person jolt (~0.3s).
+    if (flinch > 0.003) {
+      flinch *= Math.exp(-dt * 7);
+      const a = flinch * flinch * 0.05;
+      camera.rotateX(Math.sin(flinch * 37) * a);
+      camera.rotateZ(Math.sin(flinch * 23) * a * 0.6);
     }
-    // Shared front cam (non-seated spectators): breathing bob — a gentle
-    // up/down + side sway along the camera's own axes, two slightly different
-    // frequencies so it doesn't feel mechanical.
-    bobT += dt;
-    camera.translateY(Math.sin(bobT * 1.1) * BOB_Y);
-    camera.translateX(Math.sin(bobT * 0.73) * BOB_X);
-    // Cursor parallax: look slightly toward the cursor, eased so it glides.
-    curMx += (targetMx - curMx) * Math.min(1, dt * 5);
-    curMy += (targetMy - curMy) * Math.min(1, dt * 5);
-    camera.rotateY(-curMx * MAX_YAW);
-    camera.rotateX(-curMy * MAX_PITCH);
   };
 
   // Broadcast where this player is looking (throttled) so their avatar turns its
@@ -1126,28 +1114,29 @@ export function setupBee(opts: BeeOpts): BeeStage {
   const sendLook = () => {
     const now = performance.now();
     if (now - lastLookAt < 150) return;
-    const active = !onMatchCam() && lookGain > 0.05;
-    const yaw = active ? -lookX * LOOK_YAW * lookGain : 0;
-    const pitch = active ? -lookY * (lookY > 0 ? LOOK_PITCH_DOWN : LOOK_PITCH_UP) * lookGain : 0;
+    const active = !onMatchCam() && lookGain > 0.05; // non-seated spectators have no avatar
+    const r = lookRange();
+    const yaw = active ? -lookX * r.yaw * lookGain : 0;
+    const pitch = active ? -lookY * (lookY > 0 ? r.down : r.up) * lookGain : 0;
     if (Math.abs(yaw - sentYaw) < 0.02 && Math.abs(pitch - sentPitch) < 0.02) return;
     sentYaw = yaw; sentPitch = pitch; lastLookAt = now;
     net.sendBee({ type: "bee_look", yaw, pitch });
   };
 
-  // Touch: a one-finger drag on the 3D scene looks around (whenever free-look is
-  // active: the lobby + waiting players mid-match — never the speller, whose
-  // canvas taps belong to the golden chalk). The drag "grabs the world": dragging
-  // right swings the view left. DOM overlays (the clipboard tap-zone, panels,
-  // buttons) sit above the canvas and keep their taps.
+  // Touch: a one-finger drag on the 3D scene looks around (lobby, seated players,
+  // and spectators alike). The drag "grabs the world": dragging right swings the
+  // view left. DOM overlays (the clipboard tap-zone, panels, buttons) sit above
+  // the canvas and keep their taps.
   if (isTouch) {
     let dragId: number | null = null, dragLX = 0, dragLY = 0;
     const clampLook = (v: number) => Math.max(-1, Math.min(1, v));
+    const noLook = () => phase !== "lobby" && phase !== "match";
     sceneCanvas.addEventListener("pointerdown", (e) => {
-      if (onMatchCam()) return;
+      if (noLook()) return;
       dragId = e.pointerId; dragLX = e.clientX; dragLY = e.clientY;
     });
     window.addEventListener("pointermove", (e) => {
-      if (dragId !== e.pointerId || onMatchCam()) return;
+      if (dragId !== e.pointerId || noLook()) return;
       lookTX = clampLook(lookTX - ((e.clientX - dragLX) * 1.7) / window.innerWidth);
       lookTY = clampLook(lookTY - ((e.clientY - dragLY) * 1.7) / window.innerHeight);
       dragLX = e.clientX; dragLY = e.clientY;
