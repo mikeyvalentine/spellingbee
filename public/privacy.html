@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="all" />
+  <title>Privacy Policy — Spelling Bee</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0; padding: 40px 20px 80px; background: #0d1018; color: #e9edf5;
+      font: 16px/1.65 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    }
+    main { max-width: 760px; margin: 0 auto; }
+    h1 { font-size: 30px; margin: 0 0 4px; }
+    h2 { font-size: 20px; margin: 34px 0 8px; color: #ffd23b; }
+    .updated { color: #9aa4b2; font-size: 14px; margin-bottom: 28px; }
+    a { color: #8fb6ff; }
+    ul { padding-left: 22px; }
+    li { margin: 5px 0; }
+    code { background: #1b2230; padding: 1px 5px; border-radius: 5px; font-size: 14px; }
+    table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 15px; }
+    th, td { border: 1px solid #2a3344; padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #161b25; color: #cdd6e4; }
+    .note { color: #9aa4b2; font-size: 14px; border-top: 1px solid #2a3344; margin-top: 40px; padding-top: 18px; }
+    strong.k { color: #ffd23b; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Privacy Policy</h1>
+  <div class="updated">Spelling Bee &middot; Last updated: June 12, 2026</div>
+
+  <p>This Privacy Policy explains what information <strong>Spelling Bee</strong> (the &ldquo;Activity&rdquo;), a
+  Discord Activity, processes when you use it, and how that information is handled. We have designed the Activity
+  to use as little personal data as possible. We do <strong>not</strong> sell your data, show advertising, use
+  tracking or analytics cookies, or build advertising profiles.</p>
+
+  <h2>1. Information we process</h2>
+  <table>
+    <tr><th>Data</th><th>Source</th><th>Why</th></tr>
+    <tr>
+      <td><strong class="k">Discord user ID, display name, and avatar</strong></td>
+      <td>Discord, via the OAuth <code>identify</code> permission (the only permission we request)</td>
+      <td>To identify you to the other players in your room and show your name and character in the game.</td>
+    </tr>
+    <tr>
+      <td><strong class="k">In-game actions</strong> — the letters/words you type during your turn, your
+        camera look direction, emotes you trigger, and derived stats (typing speed, accuracy)</td>
+      <td>You, while playing</td>
+      <td>To run the live multiplayer match and show your turn to the other players in your room.</td>
+    </tr>
+    <tr>
+      <td><strong class="k">The word to be spelled</strong> (a dictionary word, not personal data)</td>
+      <td>The game&rsquo;s built-in word list</td>
+      <td>Sent to a text-to-speech provider to generate the audio that reads the word aloud.</td>
+    </tr>
+  </table>
+
+  <p>We do <strong>not</strong> collect your email address, your Discord messages, your friends or server lists,
+  your payment information, or your real-world identity. The Activity does <strong>not</strong> record, store,
+  or transmit microphone audio — voice chat is handled entirely by Discord and is outside this Activity.</p>
+
+  <h2>2. How long we keep it</h2>
+  <p>Your Discord identity and in-game actions are processed <strong>in memory, only for the duration of your
+  session</strong>, and are discarded when you leave or the game room closes. We do not write your name,
+  Discord ID, or gameplay to a database.</p>
+  <p>The only information stored beyond a session is <strong>non-personal and aggregate</strong>:</p>
+  <ul>
+    <li>A running count of the total number of text characters sent to the text-to-speech service (used to
+        monitor usage and cost). This is a single number and contains no personal data.</li>
+    <li>For public match-making rooms, a temporary directory entry containing a room code, the
+        <em>number</em> of players, and the room&rsquo;s status. This contains no names or Discord IDs and is
+        deleted automatically when the room is empty.</li>
+  </ul>
+
+  <h2>3. Who can see your information</h2>
+  <ul>
+    <li><strong>Other players in your room.</strong> Multiplayer is the point of the Activity: your display
+        name, avatar/character, emotes, and the letters you type on your turn are visible in real time to the
+        other players in the same game room.</li>
+    <li><strong>Service providers we use to run the Activity</strong> (described below). We do not otherwise
+        share, rent, or sell your information.</li>
+  </ul>
+
+  <h2>4. Service providers</h2>
+  <p>The Activity relies on the following third parties to function. Each acts as a processor for the limited
+  purpose described, and your use is also subject to their privacy policies:</p>
+  <table>
+    <tr><th>Provider</th><th>Role</th><th>What it receives</th></tr>
+    <tr>
+      <td><a href="https://discord.com/privacy" target="_blank" rel="noopener">Discord</a></td>
+      <td>Delivers the Activity and provides your identity via OAuth</td>
+      <td>Standard Discord platform data; the Activity receives your user ID, display name, and avatar.</td>
+    </tr>
+    <tr>
+      <td><a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener">Cloudflare</a></td>
+      <td>Hosts the game server and serves the app (Cloudflare Workers &amp; Durable Objects)</td>
+      <td>Real-time game traffic; processes connection metadata such as IP addresses as part of delivering the
+          service. Stores only the non-personal aggregates described in Section&nbsp;2.</td>
+    </tr>
+    <tr>
+      <td><a href="https://cloud.google.com/terms/cloud-privacy-notice" target="_blank" rel="noopener">Google Cloud
+        Text-to-Speech</a></td>
+      <td>Generates the spoken audio of the word to be spelled</td>
+      <td>The dictionary word to synthesize. No personal data is sent.</td>
+    </tr>
+    <tr>
+      <td><a href="https://elevenlabs.io/privacy" target="_blank" rel="noopener">ElevenLabs</a></td>
+      <td>Alternative text-to-speech provider (may be used in place of Google)</td>
+      <td>The dictionary word to synthesize. No personal data is sent.</td>
+    </tr>
+  </table>
+
+  <h2>5. Cookies and tracking</h2>
+  <p>The Activity does not use advertising or analytics cookies and does not track you across other sites or
+  apps. The app may store small, non-identifying settings (such as your audio volume preferences) locally in
+  your own browser; this never leaves your device.</p>
+
+  <h2>6. Children</h2>
+  <p>The Activity is not directed to children under the age required to use Discord (at least 13, or the
+  minimum age of digital consent in your country). We do not knowingly collect personal information from
+  anyone below that age.</p>
+
+  <h2>7. Your choices and rights</h2>
+  <p>Because we do not store your personal information after your session, there is generally no retained
+  personal data to access, correct, or delete. You can stop all processing at any time by leaving or closing
+  the Activity. You may also manage the Activity&rsquo;s access to your Discord account from
+  <em>User Settings &rarr; Authorized Apps</em> in Discord. For any privacy question or request, contact us
+  using the details below.</p>
+
+  <h2>8. International users</h2>
+  <p>The service providers above may process data in the United States and other countries. By using the
+  Activity you understand that limited data may be processed in locations outside your own country as part of
+  delivering the service.</p>
+
+  <h2>9. Changes to this policy</h2>
+  <p>We may update this Privacy Policy from time to time. Material changes will be reflected by updating the
+  &ldquo;Last updated&rdquo; date above.</p>
+
+  <h2>10. Contact</h2>
+  <p>For privacy questions or requests, contact
+  <a href="mailto:michaelsmailmachine@gmail.com">michaelsmailmachine@gmail.com</a>.</p>
+
+  <p class="note">See also our <a href="/terms">Terms of Service</a>.</p>
+</main>
+</body>
+</html>

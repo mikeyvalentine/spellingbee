@@ -98,6 +98,9 @@ export default {
     const p = url.pathname;
 
     if (p === "/healthz") return new Response("ok");
+    // /terms and /privacy (Discord publishing requires public ToS + Privacy
+    // URLs) are served straight from public/{terms,privacy}.html by the ASSETS
+    // binding's html-handling at the fall-through below.
     if (p === "/api/token" && request.method === "POST") return handleToken(request, env);
     if (p === "/api/voice-preview") return handleVoicePreview(url, env);
 
