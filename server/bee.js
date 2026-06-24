@@ -2,7 +2,7 @@
 // A host opens a lobby; players join/ready; host starts. Each turn the next
 // queued player must spell a narrated word while everyone watches; a miss
 // eliminates them; last speller standing wins (solo = survival).
-import { english10, english20, american10, american20 } from "wordlist-js";
+import { english10, english20, english35, english40, american10, american20, american35, american40 } from "wordlist-js";
 import wotc from "./wotc.json" with { type: "json" };
 import { synth } from "./tts.js";
 
@@ -73,12 +73,30 @@ function freqPool(lists, min, max) {
 const wotcPool = (arr) =>
   arr.filter((w) => /^[a-z]+$/.test(w) && w.length >= 3 && w.length <= 20 && !EXCLUDE.has(w));
 
+// "Common" words = the commonest ~40k (wordlist-js bands). Used to demote
+// everyday words out of the top tiers: the Three Bee *study* list mixes brutal
+// words (diaphoresis, hydrargyrum) with common ones (squadron, derogatory,
+// colossal), which shouldn't read as VERY HARD.
+const COMMON = new Set();
+for (const list of [english10, english20, english35, english40, american10, american20, american35, american40])
+  for (const w of list) COMMON.add(w);
+
+const twoBeePool = wotcPool(wotc.twoBee);
+// Promote the hardest end of Two Bee (uncommon + long) to VERY HARD so that tier
+// isn't dominated by the short/common Three Bee study words.
+const promote = new Set(twoBeePool.filter((w) => !COMMON.has(w) && w.length >= 11));
+
 const POOLS = {
   easy:       freqPool([english10, english20, american10, american20], 4, 8), // commonest everyday words
-  medium:     wotcPool(wotc.oneBee),        // Scripps One Bee (study + champions)
-  hard:       wotcPool(wotc.twoBee),        // Scripps Two Bee (study + champions)
-  veryhard:   wotcPool(wotc.threeBeeStudy), // Scripps Three Bee school study list
-  impossible: wotcPool(wotc.threeBee),      // Scripps Three Bee champions
+  medium:     wotcPool(wotc.oneBee),                       // Scripps One Bee
+  hard:       twoBeePool.filter((w) => !promote.has(w)),   // Two Bee minus its hardest
+  // VERY HARD = the genuinely-obscure Three Bee study words (common ones like
+  // "squadron"/"derogatory" filtered out) + the promoted hardest Two Bee words.
+  veryhard:   [...new Set([
+    ...wotcPool(wotc.threeBeeStudy).filter((w) => !COMMON.has(w)),
+    ...promote,
+  ])],
+  impossible: wotcPool(wotc.threeBee),                     // Scripps Three Bee champions
 };
 
 // Difficulty ramps by ROUND (a lap = every alive player spelling once). Fixed
